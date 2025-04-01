@@ -1,0 +1,160 @@
+{
+    "datasets": {
+        "WESAD": {
+            "load": true,
+            "path": "D:/Downloads/Datasets/Stress_Project/WESAD/WESAD", 
+            "subjects": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17], 
+            "file_prefix": "S", 
+            "file_suffix": ".pkl" 
+        },
+        "NURSE": {
+            "load": true,
+            "path": "D:/Downloads/Datasets/Stress_Project/Nurse_Stress_Prediction/Nurse_Stress_Prediction.csv", 
+            "subjects": null, 
+            "file_type": "csv" 
+        }
+
+    },
+
+    "sampling_rates": {
+        "comment": "Original sampling rates before resampling. Keys follow {DATASET}_{SOURCE}_{SIGNAL} format.",
+        "WESAD_wrist_eda": 4,
+        "WESAD_wrist_bvp": 64,
+        "WESAD_wrist_temp": 4,
+        "WESAD_wrist_acc": 32,
+        "WESAD_chest_ecg": 700,
+        "WESAD_chest_eda": 700,
+        "WESAD_chest_emg": 700,
+        "WESAD_chest_temp": 700,
+        "WESAD_chest_acc": 700,
+        "WESAD_label_label": 700, 
+        "NURSE_wrist_eda": 4.0,
+        "NURSE_wrist_hr": 1.0, 
+        "NURSE_wrist_temp": 4.0,
+        "NURSE_wrist_xyz": 32.0 
+
+    },
+
+    "features_to_use": {
+        "comment": "Features selected for the COMBINED dataset model input. Order matters for concatenation.",
+        "comment2": "Ensure signals exist in at least one dataset. Pipeline pads missing ones.",
+        "chest": ["ECG", "EDA", "ACC", "EMG"], 
+        "wrist": ["EDA", "BVP", "ACC", "TEMP"] 
+    },
+
+    "label_mapping": {
+        "comment": "Maps original condition labels to standardized integer labels.",
+        "comment2": "Ensure consistency across datasets. Use descriptive names for values.",
+        "0": "transient", 
+        "1": "baseline", 
+        "2": "stress", 
+        "3": "amusement", 
+        "4": "meditation", 
+        "5": "transient", 
+        "6": "transient", 
+        "7": "transient", 
+        "comment3": "Map NURSE dataset labels (from CSV) to the standard names above.",
+        "nurse_baseline_label_value": "baseline", 
+        "nurse_stress_label_value": "stress", 
+        "nurse_other_label_value": "transient"
+    },
+    "target_label": "stress", 
+
+    "processing": {
+        "comment": "Settings for preprocessing steps.",
+        "target_sampling_rate": 64, 
+        "parallel_n_jobs": -1, 
+        "dataloader_num_workers": 0, 
+        "comment2": "Flags to control static feature calculation.",
+        "calculate_hrv": true, 
+        "calculate_eda_features": true, 
+        "calculate_acc_features": true, 
+        "calculate_temp_features": true, 
+        "calculate_freq_features": true, 
+        "calculate_resp_features": false, 
+        "calculate_interaction_features": true 
+    },
+
+    "static_features_to_use": [
+        "comment", "List of calculated static features to use as input to the model's FC layer.",
+        "comment2", "Order matters if the model expects a specific order.",
+        "comment3", "Ensure these names match the output keys from _process_single_subject_static_features.",
+        "comment4", "HRV features require NeuroKit2 and ECG data.",
+        "HRV_MeanNN", "HRV_SDNN", "HRV_RMSSD", "HRV_pNN50", "HRV_LFHF", "HRV_HF", "HRV_LF",
+        "HR_Mean", "HR_Std", 
+        "chest_EDA_Mean", "chest_EDA_Std", "SCR_Peaks_N", "SCR_Peaks_Amplitude_Mean", 
+        "wrist_EDA_Mean", "wrist_EDA_Std", 
+        "chest_ACC_Mean", "chest_ACC_Std", "chest_ACC_Range", 
+        "wrist_ACC_Mean", "wrist_ACC_Std", "wrist_ACC_Range", 
+        "chest_ACC_PeakHz", 
+        "wrist_ACC_PeakHz", 
+        "chest_TEMP_Mean", "chest_TEMP_Slope", 
+        "wrist_TEMP_Mean", "wrist_TEMP_Slope", 
+
+        "Interact_LFHF_x_WristEDA",
+        "Interact_HRmean_div_WristTempSlope",
+        "Interact_SCRpeaks_x_ChestACCstd",
+        "Interact_WristTempMean_x_WristACCmean"
+
+    ],
+
+    "windowing": {
+        "window_size_sec": 30, 
+        "window_overlap": 0.5 
+    },
+
+    "data_splits": {
+        "comment": "Ratios for GroupShuffleSplit (applied before oversampling). Ensures subjects stay in the same set.",
+        "validation_ratio": 0.25, 
+        "test_ratio": 0.25 
+    },
+
+    "model_config": {
+        "type": "CNN-LSTM", 
+        "comment_cnn": "Parameters specific to the CNN part (if type is CNN-LSTM)",
+        "cnn_filters": [32, 64], 
+        "cnn_kernels": [7, 5],
+        "cnn_stride": 1, 
+        "cnn_padding": "same", 
+        "cnn_activation": "relu", 
+        "comment_lstm": "Parameters specific to the LSTM part",
+        "lstm_layers": [64],
+        "bidirectional": true, 
+        "attn_heads": 4, 
+        "dropout": 0.3 
+    },
+
+    "training_config": {
+        "epochs": 100, 
+        "batch_size": 128, 
+        "learning_rate": 0.0001, 
+        "loss_function": "bce", 
+        "focal_loss_alpha": 0.5, 
+        "focal_loss_gamma": 2.0, 
+        "sampling_strategy": "smote" 
+    },
+
+    "tuning_config": {
+      "study_name": "stress_detection_study", 
+      "epochs": 30, 
+      "patience": 5 
+    },
+
+    "early_stopping": {
+        "patience": 5, 
+        "min_delta": 0.0005 
+    },
+
+    "save_paths": {
+        "comment": "Directories to save intermediate and final results.",
+        "processed_data": "./outputs/processed_data", 
+        "static_features_results": "./outputs/static_features", 
+        "models": "./outputs/models", 
+        "results": "./outputs/results" 
+    },
+
+    "visualization": {
+         "default_plot_duration_s": 120, 
+         "max_plot_duration_s": 60000 
+    }
+}
