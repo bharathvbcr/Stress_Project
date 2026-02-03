@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Project Outputs (Large files)
+outputs/
+*.joblib
+*.pth
+*.png
+directories to save intermediate and final results/
+
+# IDEs
+.vscode/
+.idea/
