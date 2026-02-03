@@ -37,7 +37,7 @@ C:\Users\bhara\Downloads\Code\StressProject\
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository_url>
+    git clone https://github.com/bharathvbcr/Stress_Project.git
     cd StressProject
     ```
 
