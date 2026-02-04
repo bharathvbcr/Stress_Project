@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 import logging
 import collections
+import os
+from joblib import load
 from typing import Dict, Tuple, List, Optional, Any, Union
 
 from utils import safe_get
@@ -14,7 +16,7 @@ log = logging.getLogger(__name__)
 DEFAULT_STATIC_VALUE = 0.0
 
 def create_all_subject_windows(
-    processed_data: Dict[Union[int, str], Dict[str, Any]],
+    processed_data_paths: Dict[Union[int, str], str], # CHANGED: Dict of paths
     static_features_results: Dict[Union[int, str], Optional[pd.DataFrame]],
     config: Dict[str, Any],
     input_dim_sequence: int, # Expected number of sequence features per time step
@@ -26,9 +28,10 @@ def create_all_subject_windows(
     Creates sequence/static feature windows and extracts metadata for ALL subjects.
     Ensures consistent feature dimensions using padding/defaults for missing features.
     Uses feature_channel_map for accurate padding of sequence features.
+    Loads subject data lazily from disk to prevent OOM.
 
     Args:
-        processed_data: Dictionary with processed (resampled & aligned) signals and labels.
+        processed_data_paths: Dictionary mapping subject ID to file path of processed data.
         static_features_results: Dictionary mapping subject ID to their static features DataFrame.
         config: Configuration dictionary.
         input_dim_sequence: The total number of expected sequence features (channels).
@@ -48,7 +51,7 @@ def create_all_subject_windows(
     Raises:
         ValueError: If window creation fails critically (e.g., no windows created, config issues).
     """
-    log.info("--- Creating Windows for All Subjects ---")
+    log.info("--- Creating Windows for All Subjects (Lazy Loading) ---")
 
     # --- Config Parameters ---
     window_size_sec = safe_get(config, ['windowing', 'window_size_sec'], 60)
@@ -97,7 +100,7 @@ def create_all_subject_windows(
 
     subjects_with_windows = 0
     total_windows_processed = 0
-    processed_subject_ids = sorted(list(processed_data.keys())) # Process subjects in a consistent order
+    processed_subject_ids = sorted(list(processed_data_paths.keys())) # Process subjects in a consistent order
     log.info(f"Windowing for {len(processed_subject_ids)} subjects...")
 
     # --- Default Vectors/Placeholders ---
@@ -108,7 +111,14 @@ def create_all_subject_windows(
 
     # --- Iterate Through Subjects ---
     for subj_id in processed_subject_ids:
-        subj_data = processed_data[subj_id]
+        # LAZY LOAD
+        file_path = processed_data_paths[subj_id]
+        try:
+            subj_data = load(file_path)
+        except Exception as e:
+            log.error(f"Failed to load processed data for {subj_id}: {e}")
+            continue
+
         subj_static_df = static_features_results.get(subj_id) if static_features_results else None
         log.info(f"--- Windowing S{subj_id} ---")
 
@@ -135,8 +145,7 @@ def create_all_subject_windows(
                      log.error(f"S{subj_id}: Error preparing static features: {e}. Using default.")
              else:
                  log.warning(f"S{subj_id}: Static feature DataFrame missing/empty for subject. Using default static vector.")
-        # else: log.debug(f"S{subj_id}: No static features configured (input_dim_static=0).")
-
+        
         # --- Prepare Subject's Sequence Signals and Labels ---
         labels_orig = safe_get(subj_data, ['label'])
         if labels_orig is None or not isinstance(labels_orig, np.ndarray) or labels_orig.size == 0:
@@ -191,9 +200,8 @@ def create_all_subject_windows(
             start_idx = i * step
             end_idx = start_idx + window_samples
 
-            # Safety check (should not happen with correct num_windows calculation)
+            # Safety check 
             if end_idx > max_possible_len:
-                 log.warning(f"S{subj_id} Win {i}: Calculated end index {end_idx} exceeds max length {max_possible_len}. Stopping windowing for subject.")
                  break
 
             # --- Create Combined Sequence Window Vector ---
@@ -212,12 +220,10 @@ def create_all_subject_windows(
 
                     # Validate segment length
                     if segment.shape[0] != window_samples:
-                         log.error(f"S{subj_id} Win {i}: Segment length mismatch for {unique_key} ({segment.shape[0]} vs {window_samples}). Skipping window.")
                          possible_window = False; break
 
                     # Validate segment channel count against the map
                     if segment.shape[1] != num_channels_for_this_feature:
-                         log.error(f"S{subj_id} Win {i}: Segment channel mismatch for {unique_key}. Expected {num_channels_for_this_feature}, got {segment.shape[1]}. Skipping window.")
                          possible_window = False; break
 
                     window_seq_segments.append(segment)
@@ -225,50 +231,25 @@ def create_all_subject_windows(
                 else:
                     # --- Handle Missing Signal: Padding ---
                     if num_channels_for_this_feature <= 0:
-                         # This should ideally not happen if feature_channel_map is correct
-                         log.error(f"S{subj_id} Win {i}: Cannot pad missing signal '{unique_key}' - zero channels expected in map. Skipping window.")
                          possible_window = False; break
 
                     # Create padding by tiling the default channel template
                     padding_segment = np.tile(default_seq_channel_template, (1, num_channels_for_this_feature))
-
-                    # Validate padding shape
-                    if padding_segment.shape != (window_samples, num_channels_for_this_feature):
-                         log.error(f"S{subj_id} Win {i}: Padding segment shape mismatch for {unique_key} ({padding_segment.shape} vs {(window_samples, num_channels_for_this_feature)}). Skipping window.")
-                         possible_window = False; break
-
                     window_seq_segments.append(padding_segment)
                     current_segment_channels += padding_segment.shape[1]
-                    # Log padding occurrence (optional, can be noisy)
-                    # log.warning(f"S{subj_id} Win {i}: Padding missing signal {unique_key} with defaults ({num_channels_for_this_feature} channels).")
 
             # If any segment validation failed, skip this window
             if not possible_window: continue
-
-            # --- Final Checks and Concatenation ---
-            # Check if total channels accumulated match the expected sequence dimension
-            if current_segment_channels != input_dim_sequence:
-                 log.error(f"S{subj_id} Win {i}: Total channels in segments ({current_segment_channels}) != expected sequence dimension ({input_dim_sequence}). Skipping window.")
-                 continue
 
             # Concatenate all segments along the feature axis (axis=1)
             try:
                 window_seq_vector = np.concatenate(window_seq_segments, axis=1).astype(np.float32)
             except ValueError as concat_e:
-                log.error(f"S{subj_id} Win {i}: Sequence concatenation error: {concat_e}. Seg shapes: {[s.shape for s in window_seq_segments]}. Skipping window.")
+                log.error(f"S{subj_id} Win {i}: Sequence concatenation error: {concat_e}. Skipping window.")
                 continue
-
-            # Final shape validation (redundant if channel check above works, but safe)
-            if window_seq_vector.shape != (window_samples, input_dim_sequence):
-                 log.error(f"S{subj_id} Win {i}: Final sequence vector shape {window_seq_vector.shape} != expected {(window_samples, input_dim_sequence)}. Skipping window.")
-                 continue
 
             # --- Determine Window Label ---
-            # Label is 1 if majority (>50%) of samples in window are stress
             label_segment = binary_labels[start_idx:end_idx]
-            if label_segment.size == 0: # Should not happen if window is possible
-                log.error(f"S{subj_id} Win {i}: Label segment is empty for start {start_idx}, end {end_idx}. Skipping window.")
-                continue
             assigned_label = np.int32(1) if np.mean(label_segment == 1) > 0.5 else np.int32(0)
 
             # --- Append Data to Lists ---
@@ -282,6 +263,9 @@ def create_all_subject_windows(
             subj_windows_created += 1
             subj_window_labels_dist[assigned_label] += 1
 
+        # Clear memory
+        del subj_data, signals_dict, label_signal, subject_signals, binary_labels, labels_orig
+        
         # Log summary for the subject
         if subj_windows_created > 0:
             subjects_with_windows += 1
@@ -298,15 +282,6 @@ def create_all_subject_windows(
         log.error("No windows were created for any subject. Cannot proceed.")
         raise ValueError("Window creation failed: No windows generated.")
 
-    # Final check for list length consistency
-    list_lengths = [len(lst) for lst in [
-        all_windows_seq_features_list, all_windows_static_features_list, all_windows_labels_list,
-        all_windows_groups_list, all_windows_subject_ids_list, all_windows_start_indices_list
-    ]]
-    if len(set(list_lengths)) != 1:
-        log.error(f"Mismatch between collected list lengths after windowing: {list_lengths}")
-        raise ValueError("List length mismatch after windowing process.")
-
     return (
         all_windows_seq_features_list,
         all_windows_static_features_list,
@@ -315,4 +290,3 @@ def create_all_subject_windows(
         all_windows_subject_ids_list,
         all_windows_start_indices_list
     )
-

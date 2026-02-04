@@ -2,6 +2,10 @@ import logging
 import torch
 import os
 import sys
+
+# Standard workaround for multiple OpenMP runtime initialization conflict
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
 from utils import load_config, setup_logging
 from data_loader import load_all_datasets
 from preprocessing import preprocess_all_subjects
@@ -24,25 +28,27 @@ def main():
         log.error("Failed to load configuration. Exiting.")
         return
 
-    # 2. Data Loading
-    log.info("Stage 2: Loading Raw Data")
-    raw_data, loaded_ids, failed_ids = load_all_datasets(config)
-    if not raw_data:
-        log.error("No data loaded. Exiting.")
-        return
-    log.info(f"Loaded raw data for {len(loaded_ids)} subjects.")
+    # 2. Data Loading (Lazy)
+    log.info("Stage 2: Data Loading (Generator Setup)")
+    # We skip full loading here to save memory. 
+    # preprocess_all_subjects will use the generator internally.
+    raw_data_placeholder = {} 
+    loaded_ids_placeholder = []
     
     # 3. Preprocessing
     log.info("Stage 3: Preprocessing (Resampling, Alignment, Feature Extraction)")
-    processed_data, static_features, r_peaks = preprocess_all_subjects(raw_data, loaded_ids, config)
-    if not processed_data:
-        log.error("Preprocessing failed. Exiting.")
+    # Pass placeholders; the function uses yield_all_subjects(config) internally
+    processed_data_paths, static_features, r_peaks = preprocess_all_subjects(raw_data_placeholder, loaded_ids_placeholder, config)
+    
+    if not processed_data_paths:
+        log.error("Preprocessing failed (no subjects processed). Exiting.")
         return
     
     # 4. Pipeline (Windowing, Splitting, Sampling, Loader Creation)
     log.info("Stage 4: Preparing Pipeline (Windows, Splits, Sampling, Loaders)")
+    # processed_data_paths is now a dict of file paths
     train_loader, val_loader, test_loader, seq_dim, static_dim = prepare_dataloaders(
-        processed_data, static_features, config
+        processed_data_paths, static_features, config
     )
     if not train_loader:
         log.error("Failed to create DataLoaders. Exiting.")

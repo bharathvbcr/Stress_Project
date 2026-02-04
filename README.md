@@ -14,11 +14,12 @@ This project implements a comprehensive deep learning pipeline for detecting str
     *   **Bio-signal Analysis:** Computes HRV (Heart Rate Variability), EDA (Phasic/Tonic), and statistical features using `neurokit2` and `scikit-learn`.
     *   **Parallel Processing:** Optimized feature extraction using `joblib`.
 *   **Imbalance Handling:** Implements **SMOTE** (Synthetic Minority Over-sampling Technique) and **Focal Loss** / Class Weighting to address severe class imbalance.
-*   **Optimized Pipeline:**
-    *   **Hyperparameter Tuning:** Integrated Optuna tuning loop.
-    *   **Modular Design:** Separated concerns for loading, splitting, sampling, and training.
-    *   **Interactive Visualization:** Jupyter widgets for exploring raw signals, predictions, and model performance.
-
+*   **Performance & Memory Optimizations:**
+    *   **Lazy Loading:** Uses Python generators to load subject data one-by-one, significantly reducing RAM usage for large datasets.
+    *   **Incremental Preprocessing:** Processes subjects in batches and saves individual subject files to disk immediately to prevent Out-of-Memory (OOM) errors.
+    *   **High-Speed Data Loading:** Optimized PyTorch DataLoaders with multi-process workers (`num_workers=4`) and pinned memory for fast GPU utilization.
+    *   **Dimensionality-Aware Sampling:** Automatically falls back from SMOTE to Random Oversampling if feature dimensions are too high (>2000) to maintain performance.
+*   **Interactive Visualization:** Jupyter widgets for exploring raw signals, predictions, and model performance.
 ## 📂 Project Structure
 
 ```text
@@ -109,9 +110,11 @@ For exploration and visualization, use the Jupyter Notebook:
 ## 📊 Pipeline Stages
 
 1.  **Data Loading:** Reads raw pickle/CSV files.
-2.  **Preprocessing:**
+2.  **Preprocessing (Batch/Generator Mode):**
+    *   **Incremental Processing:** Processes subjects in small batches via generators to minimize memory footprint.
     *   **Resampling:** Downsamples signals to a common target rate (e.g., 64Hz).
     *   **Feature Extraction:** Calculates HRV metrics using original high-freq ECG data.
+    *   **On-Disk Storage:** Saves each subject's processed signals individually as `.joblib` files.
 3.  **Windowing:** Slices continuous signals into fixed-length windows (e.g., 60s).
 4.  **Splitting:** Performs **Subject-Group Stratified Split** to ensure no subject leakage between Train/Val/Test.
 5.  **Sampling:** Applies **SMOTE** or Random Oversampling to the Training set to balance stress/non-stress classes.

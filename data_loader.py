@@ -475,4 +475,58 @@ def load_all_datasets(config: Dict[str, Any]) -> Tuple[Dict[str, Dict[str, Any]]
         log.critical("No subject data was loaded successfully from any dataset.")
 
     # Return the combined data, list of loaded IDs, and list of failed IDs
+    # NOTE: This function is deprecated in favor of yield_all_subjects for memory efficiency.
+    # It remains for backward compatibility or small dataset usage.
     return all_datasets_data, subjects_loaded_ids, subjects_failed_ids
+
+
+def yield_all_subjects(config: Dict[str, Any]):
+    """
+    Generator that yields subject data one by one to save memory.
+    
+    Yields:
+        Tuple[str, Dict[str, Any]]: (subject_id, subject_data)
+    """
+    log_prefix = "[Data Generator]"
+    
+    if not config:
+        log.error("Configuration dictionary is missing.")
+        return
+
+    datasets_config = safe_get(config, ['datasets'], {})
+    if not datasets_config:
+        log.error("No 'datasets' section found in config.")
+        return
+
+    for dataset_id, dataset_config in datasets_config.items():
+        if not isinstance(dataset_config, dict) or not dataset_config.get('load', False):
+            continue
+
+        dataset_type = dataset_config.get('file_type', 'pkl' if dataset_id == 'WESAD' else None)
+
+        # --- WESAD (Lazy Load) ---
+        if dataset_id == 'WESAD' and dataset_type == 'pkl':
+            subjects_to_load = dataset_config.get('subjects', [])
+            for subject_id in subjects_to_load:
+                try:
+                    subj_id_int = int(subject_id)
+                    subject_data = load_wesad_subject_data(subj_id_int, dataset_config, config)
+                    if subject_data:
+                        yield str(subj_id_int), subject_data
+                    else:
+                        log.warning(f"{log_prefix} Failed to load WESAD_{subject_id}")
+                except Exception as e:
+                    log.error(f"{log_prefix} Error yielding WESAD_{subject_id}: {e}")
+
+        # --- NURSE (Bulk Load then Yield) ---
+        elif dataset_id == 'NURSE' and dataset_type == 'csv':
+             nurse_data_dict = load_nurse_dataset(dataset_config, config)
+             if nurse_data_dict:
+                 for subj_id, subj_data in nurse_data_dict.items():
+                     yield subj_id, subj_data
+             else:
+                 log.error(f"{log_prefix} Failed to load Nurse dataset.")
+        
+        else:
+            log.warning(f"Unsupported dataset ID '{dataset_id}' or file_type '{dataset_type}'. Skipping.")
+

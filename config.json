@@ -64,7 +64,7 @@
         "comment": "Settings for preprocessing steps.",
         "target_sampling_rate": 64, 
         "parallel_n_jobs": -1, 
-        "dataloader_num_workers": 0, 
+        "dataloader_num_workers": 4, 
         "comment2": "Flags to control static feature calculation.",
         "calculate_hrv": true, 
         "calculate_eda_features": true, 

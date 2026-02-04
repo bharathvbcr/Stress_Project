@@ -5,6 +5,7 @@ import pandas as pd
 import torch
 import logging
 from typing import Dict, Tuple, List, Optional, Any, Union
+from joblib import load
 from torch.utils.data import DataLoader
 
 from windowing import create_all_subject_windows
@@ -19,16 +20,17 @@ log = logging.getLogger(__name__)
 # == Helper Function: Calculate Input Dimensions ==
 # ==============================================================================
 def _calculate_input_dims(
-    processed_data: Dict[Union[int, str], Dict[str, Any]],
+    processed_data_paths: Dict[Union[int, str], str], # CHANGED: Dict of paths
     static_features_results: Dict[Union[int, str], Optional[pd.DataFrame]],
     config: Dict[str, Any]
 ) -> Tuple[Optional[int], Optional[int], Optional[List[str]], Optional[Dict[str, int]]]:
     """
     Calculates sequence and static input dimensions based on config and processed data.
     Also determines the order of sequence features and their channel counts.
+    Loads one subject lazily to infer dimensions.
 
     Args:
-        processed_data: Dictionary with processed (resampled & aligned) signals and labels.
+        processed_data_paths: Dictionary mapping subject ID to processed data file path.
         static_features_results: Dictionary mapping subject ID to their static features DataFrame.
         config: Configuration dictionary.
 
@@ -52,19 +54,23 @@ def _calculate_input_dims(
     temp_feature_order_list = [] # Build the order based on config
     expected_input_dim_sequence = 0
 
-    # Find the first subject with actual signal data to infer dimensions
+    # Find the first subject with valid path
     first_subj_data = None
     first_subj_id = None
-    if processed_data:
-        for subj_id_candidate in processed_data:
-            # Check if 'signal' key exists and is not empty
-            if safe_get(processed_data[subj_id_candidate], ['signal']):
+    if processed_data_paths:
+        for subj_id_candidate, path in processed_data_paths.items():
+            try:
                 first_subj_id = subj_id_candidate
-                first_subj_data = processed_data[first_subj_id]
-                break
+                first_subj_data = load(path) # LAZY LOAD
+                if safe_get(first_subj_data, ['signal']):
+                    break
+            except Exception as e:
+                log.warning(f"Failed to load sample subject {subj_id_candidate} for dim calc: {e}")
+                first_subj_data = None
+                continue
 
     if not first_subj_data:
-        log.error("Cannot calculate sequence dimension: processed_data is empty or no subjects have signal data.")
+        log.error("Cannot calculate sequence dimension: processed_data_paths is empty or valid subject not found.")
         return None, None, None, None
 
     log.debug(f"Using S{first_subj_id} to determine sequence dimensions and channel counts.")
@@ -76,11 +82,8 @@ def _calculate_input_dims(
         if signal is not None and isinstance(signal, np.ndarray) and signal.size > 0:
             # Infer channels from shape (assume Time, Channels)
             num_channels = signal.shape[1] if signal.ndim > 1 else 1
-            # Special handling for ACC: Warn if not 3 channels (unless it's magnitude)
             if key.upper() == 'ACC' and num_channels != 3 and num_channels != 1:
-                 log.warning(f"S{first_subj_id}: ACC signal '{unique_key}' has {num_channels} channel(s). Expected 3 (XYZ) or 1 (magnitude). Assuming {num_channels}.")
-            elif key.upper() == 'ACC' and num_channels == 3:
-                 log.debug(f"S{first_subj_id}: Found 3 channels for ACC signal '{unique_key}'.")
+                 log.warning(f"S{first_subj_id}: ACC signal '{unique_key}' has {num_channels} channel(s). Expected 3 or 1.")
             elif key.upper() == 'ACC' and num_channels == 1:
                  log.debug(f"S{first_subj_id}: Found 1 channel for ACC signal '{unique_key}' (likely magnitude).")
 
@@ -88,9 +91,8 @@ def _calculate_input_dims(
             # If missing in the sample subject, try to infer standard channels
             if key.upper() == 'ACC': num_channels = 3 # Assume ACC is 3 channels if missing
             else: num_channels = 1 # Assume 1 channel for others if missing
-            log.warning(f"S{first_subj_id} (used for dim calc) missing expected feature '{unique_key}'. Assuming {num_channels} channel(s) based on key type.")
+            log.warning(f"S{first_subj_id} (used for dim calc) missing expected feature '{unique_key}'. Assuming {num_channels} channel(s).")
         else:
-             # Handle cases like empty arrays if not caught by signal.size > 0
              log.warning(f"Unexpected type {type(signal)} or empty array for feature '{unique_key}' in S{first_subj_id}. Assuming 1 channel.")
              num_channels = 1
 
@@ -101,7 +103,6 @@ def _calculate_input_dims(
     # Chest features
     for key in chest_features_to_use:
         unique_key = f"chest_{key}"
-        # Ensure feature is added only once even if listed multiple times (unlikely)
         if unique_key not in temp_feature_order_list:
              num_ch = get_channels(first_subj_data, 'chest', key, unique_key)
              temp_feature_order_list.append(unique_key)
@@ -143,7 +144,7 @@ def _calculate_input_dims(
 # ==============================================================================
 
 def get_data_splits(
-    processed_data: Dict[Union[int, str], Dict[str, Any]],
+    processed_data_paths: Dict[Union[int, str], str], # CHANGED: Dict of paths
     static_features_results: Dict[Union[int, str], Optional[pd.DataFrame]],
     config: Dict[str, Any]
 ) -> Tuple[Tuple[List, ...], Tuple[List, ...], Tuple[List, ...], Optional[int], Optional[int]]:
@@ -152,7 +153,7 @@ def get_data_splits(
     Performs dimension calculation, windowing, splitting, and sampling.
 
     Args:
-        processed_data: Dictionary with processed (resampled & aligned) signals and labels.
+        processed_data_paths: Dictionary mapping subject ID to processed data file path.
         static_features_results: Dictionary mapping subject ID to their static features DataFrame.
         config: Configuration dictionary.
 
@@ -166,13 +167,13 @@ def get_data_splits(
             Returns (None, None, None, None, None) if any critical step fails.
     """
     log.info("--- Preparing Data Splits (Windowing -> Splitting -> Sampling) ---")
-    if not processed_data:
-        log.error("get_data_splits: processed_data dictionary is empty.")
+    if not processed_data_paths:
+        log.error("get_data_splits: processed_data_paths dictionary is empty.")
         return None, None, None, None, None
 
     # --- Step 1: Calculate Input Dimensions ---
     input_dim_sequence, input_dim_static, feature_order_list, feature_channel_map = _calculate_input_dims(
-        processed_data, static_features_results, config
+        processed_data_paths, static_features_results, config
     )
     if input_dim_sequence is None or input_dim_static is None or feature_order_list is None or feature_channel_map is None:
         log.error("get_data_splits: Failed to determine input dimensions or feature map.")
@@ -182,7 +183,7 @@ def get_data_splits(
     try:
         # Pass the calculated dimensions and feature map to the windowing function
         all_data_lists = create_all_subject_windows(
-            processed_data, static_features_results, config,
+            processed_data_paths, static_features_results, config,
             input_dim_sequence, input_dim_static, feature_order_list, feature_channel_map
         )
     except ValueError as e:
@@ -216,7 +217,7 @@ def get_data_splits(
 
 
 def prepare_dataloaders(
-    processed_data: Dict[Union[int, str], Dict[str, Any]], # Output from preprocessing.py
+    processed_data_paths: Dict[Union[int, str], str], # CHANGED: Dict of paths
     static_features_results: Dict[Union[int, str], Optional[pd.DataFrame]], # Output from preprocessing.py
     config: Dict[str, Any]
 ) -> Tuple[Optional[DataLoader], Optional[DataLoader], Optional[DataLoader], Optional[int], Optional[int]]:
@@ -225,7 +226,7 @@ def prepare_dataloaders(
     Calls `get_data_splits` and then `create_pytorch_dataloaders`.
 
     Args:
-        processed_data: Dictionary with processed (resampled & aligned) signals and labels.
+        processed_data_paths: Dictionary mapping subject ID to processed data file path.
         static_features_results: Dictionary mapping subject ID to their static features DataFrame.
         config: Configuration dictionary.
 
@@ -240,7 +241,7 @@ def prepare_dataloaders(
     """
     # --- Step 1: Get Data Splits ---
     train_data_sampled, val_data, test_data, input_dim_sequence, input_dim_static = get_data_splits(
-        processed_data, static_features_results, config
+        processed_data_paths, static_features_results, config
     )
 
     if train_data_sampled is None:

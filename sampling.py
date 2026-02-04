@@ -132,57 +132,70 @@ def apply_sampling(
                 #    Combine with static features if they exist.
                 X_seq_np = np.stack(X_train_seq_list, axis=0)
                 n_samples, window_len, n_seq_features = X_seq_np.shape
-                X_seq_flat = X_seq_np.reshape(n_samples, -1) # Flatten sequence windows: (N, L*F)
-
-                # Check if static features exist and are non-empty
-                has_static = bool(X_train_static_list) and X_train_static_list[0].size > 0
-                if has_static:
-                    X_static_np = np.stack(X_train_static_list, axis=0)
-                    # Ensure static features are 2D (N, S) even if S=1
-                    if X_static_np.ndim == 1: X_static_np = X_static_np[:, np.newaxis]
-                    # Combine flattened sequence and static features
-                    X_combined_flat = np.concatenate((X_seq_flat, X_static_np), axis=1)
-                    log.info(f"SMOTE input shape (Seq+Static): {X_combined_flat.shape}")
+                
+                # Check for high dimensionality
+                total_features = window_len * n_seq_features
+                if total_features > 2000:
+                    log.warning(f"High dimensionality detected ({total_features} features/window). SMOTE is expensive and memory-intensive.")
+                    log.warning("Falling back to Random Oversampling to prevent OOM/Performance issues.")
+                    _random_oversample(
+                        X_train_seq_list, X_train_static_list, y_train_list,
+                        subj_ids_train_list, starts_train_list,
+                        y_train_np_pre, minority_class_label, n_majority, n_minority,
+                        resampled_lists
+                    )
                 else:
-                    X_combined_flat = X_seq_flat # Use only sequence features
-                    log.info(f"SMOTE input shape (Sequence only): {X_combined_flat.shape}")
+                    X_seq_flat = X_seq_np.reshape(n_samples, -1) # Flatten sequence windows: (N, L*F)
 
-                # 2. Apply SMOTE
-                # Adjust k_neighbors based on the number of minority samples
-                # k_neighbors must be less than the number of minority samples
-                k_neighbors = min(5, n_minority - 1) if n_minority > 1 else 1
-                if k_neighbors < 1:
-                     log.warning(f"SMOTE k_neighbors calculated as {k_neighbors}. Setting to 1.")
-                     k_neighbors = 1
+                    # Check if static features exist and are non-empty
+                    has_static = bool(X_train_static_list) and X_train_static_list[0].size > 0
+                    if has_static:
+                        X_static_np = np.stack(X_train_static_list, axis=0)
+                        # Ensure static features are 2D (N, S) even if S=1
+                        if X_static_np.ndim == 1: X_static_np = X_static_np[:, np.newaxis]
+                        # Combine flattened sequence and static features
+                        X_combined_flat = np.concatenate((X_seq_flat, X_static_np), axis=1)
+                        log.info(f"SMOTE input shape (Seq+Static): {X_combined_flat.shape}")
+                    else:
+                        X_combined_flat = X_seq_flat # Use only sequence features
+                        log.info(f"SMOTE input shape (Sequence only): {X_combined_flat.shape}")
 
-                smote = SMOTE(random_state=42, k_neighbors=k_neighbors)
-                # Fit and resample the combined flattened data
-                X_resampled_flat, y_train_resampled_list = smote.fit_resample(X_combined_flat, y_train_list)
-                n_resampled = len(y_train_resampled_list)
-                log.info(f"SMOTE generated {n_resampled - n_samples} new synthetic samples.")
+                    # 2. Apply SMOTE
+                    # Adjust k_neighbors based on the number of minority samples
+                    # k_neighbors must be less than the number of minority samples
+                    k_neighbors = min(5, n_minority - 1) if n_minority > 1 else 1
+                    if k_neighbors < 1:
+                         log.warning(f"SMOTE k_neighbors calculated as {k_neighbors}. Setting to 1.")
+                         k_neighbors = 1
 
-                # 3. Unpack resampled data
-                # Separate sequence and static features from the resampled array
-                X_seq_resampled_flat = X_resampled_flat[:, :window_len * n_seq_features]
-                X_static_resampled_np = X_resampled_flat[:, window_len * n_seq_features:] if has_static else None
+                    smote = SMOTE(random_state=42, k_neighbors=k_neighbors)
+                    # Fit and resample the combined flattened data
+                    X_resampled_flat, y_train_resampled_list = smote.fit_resample(X_combined_flat, y_train_list)
+                    n_resampled = len(y_train_resampled_list)
+                    log.info(f"SMOTE generated {n_resampled - n_samples} new synthetic samples.")
 
-                # Reshape sequence features back: (N_resampled, L*F) -> (N_resampled, L, F)
-                X_train_seq_resampled_np = X_seq_resampled_flat.reshape(n_resampled, window_len, n_seq_features)
-                # Convert back to list of arrays
-                X_train_seq_resampled_list = [X_train_seq_resampled_np[i] for i in range(n_resampled)]
+                    # 3. Unpack resampled data
+                    # Separate sequence and static features from the resampled array
+                    X_seq_resampled_flat = X_resampled_flat[:, :window_len * n_seq_features]
+                    X_static_resampled_np = X_resampled_flat[:, window_len * n_seq_features:] if has_static else None
 
-                # Convert static features back to list of arrays
-                if X_static_resampled_np is not None:
-                    X_train_static_resampled_list = [X_static_resampled_np[i] for i in range(n_resampled)]
-                else: # Handle case where static features were not used
-                    X_train_static_resampled_list = [np.array([], dtype=np.float32)] * n_resampled
+                    # Reshape sequence features back: (N_resampled, L*F) -> (N_resampled, L, F)
+                    X_train_seq_resampled_np = X_seq_resampled_flat.reshape(n_resampled, window_len, n_seq_features)
+                    # Convert back to list of arrays
+                    X_train_seq_resampled_list = [X_train_seq_resampled_np[i] for i in range(n_resampled)]
 
-                # Handle metadata (subject IDs, start indices) for synthetic samples
-                original_n = len(subj_ids_train_list)
-                # Mark synthetic samples with a special ID
-                subj_ids_train_resampled_list = list(subj_ids_train_list) + ['SMOTE_SYNTHETIC'] * (n_resampled - original_n)
-                # Assign a placeholder start index (e.g., -1) for synthetic samples
-                starts_train_resampled_list = list(starts_train_list) + [-1] * (n_resampled - original_n)
+                    # Convert static features back to list of arrays
+                    if X_static_resampled_np is not None:
+                        X_train_static_resampled_list = [X_static_resampled_np[i] for i in range(n_resampled)]
+                    else: # Handle case where static features were not used
+                        X_train_static_resampled_list = [np.array([], dtype=np.float32)] * n_resampled
+
+                    # Handle metadata (subject IDs, start indices) for synthetic samples
+                    original_n = len(subj_ids_train_list)
+                    # Mark synthetic samples with a special ID
+                    subj_ids_train_resampled_list = list(subj_ids_train_list) + ['SMOTE_SYNTHETIC'] * (n_resampled - original_n)
+                    # Assign a placeholder start index (e.g., -1) for synthetic samples
+                    starts_train_resampled_list = list(starts_train_list) + [-1] * (n_resampled - original_n)
 
             except ValueError as smote_e:
                  log.error(f"SMOTE failed: {smote_e}. This often happens if minority samples < k_neighbors+1.")
