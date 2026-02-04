@@ -141,6 +141,14 @@ def get_sampling_rate(config: Dict[str, Any], signal_key: str, source: str, data
         return None
 
 
+def setup_logging(level=logging.INFO):
+    """Configures basic logging for the project."""
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(levelname)s - [%(name)s] - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
 # --- Safe Dictionary Access ---
 def safe_get(data_dict: Optional[Dict], keys: List[str], default: Any = None) -> Any:
     """

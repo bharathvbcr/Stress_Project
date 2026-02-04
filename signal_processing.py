@@ -6,14 +6,7 @@ import warnings
 import logging
 from typing import Dict, Any, Optional, Tuple, List, Union
 
-# Assuming utils.py is in the same directory or PYTHONPATH
-try:
-    from utils import get_sampling_rate, safe_get
-except ImportError:
-    # Fallback implementations if utils not found
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
-    def get_sampling_rate(*args): return None # Placeholder
-    logging.warning("Could not import from 'utils'. Using basic fallbacks in signal_processing.py.")
+from utils import get_sampling_rate, safe_get
 
 log = logging.getLogger(__name__)
 

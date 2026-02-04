@@ -6,19 +6,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, Optional, Tuple, List, Union
 
-# Assuming utils.py is in the same directory or PYTHONPATH
-try:
-    from utils import safe_get, get_sampling_rate
-except ImportError:
-    # Basic fallback implementations if utils cannot be imported
-    def safe_get(data_dict, keys, default=None): temp = data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
-    def get_sampling_rate(config, signal_key, source, dataset_id="WESAD"):
-         rate_key = f"{dataset_id}_{source}_{signal_key}".upper()
-         possible_keys = [ f"{dataset_id.upper()}_{source.lower()}_{signal_key.lower()}", f"{dataset_id.upper()}_{source.lower()}_{signal_key.upper()}", f"{dataset_id.upper()}_{source.upper()}_{signal_key.lower()}", f"{dataset_id.upper()}_{source.upper()}_{signal_key.upper()}", ]
-         fs = None; sampling_rates_dict = safe_get(config, ['sampling_rates'], {})
-         fs = next((sampling_rates_dict.get(key) for key in possible_keys if sampling_rates_dict.get(key) is not None), None)
-         return fs if fs is not None and isinstance(fs, (int, float)) and fs > 0 else None
-    logging.warning("Could not import from 'utils'. Using basic fallbacks for safe_get and get_sampling_rate.")
+from utils import safe_get, get_sampling_rate
 
 log = logging.getLogger(__name__)
 

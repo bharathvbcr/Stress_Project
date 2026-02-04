@@ -10,13 +10,7 @@ from joblib import Parallel, delayed
 import multiprocessing
 from typing import Dict, Any, Optional, Tuple, List, Union
 
-# Assuming utils.py is in the same directory or PYTHONPATH
-try:
-    from utils import safe_get
-except ImportError:
-    # Fallback implementation if utils not found
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
-    logging.warning("Could not import 'safe_get' from 'utils'. Using basic fallback in feature_extraction.py.")
+from utils import safe_get
 
 # Attempt to import NeuroKit2
 try:
@@ -216,8 +210,12 @@ def calculate_subject_static_features(
     # (Logic copied and verified from original preprocessing.py V7)
     # 1. HRV / HR
     if calc_hrv:
-        ecg_signal = safe_get(subject_proc_data, ['signal', 'chest', 'ECG']); ecg_fs = safe_get(subject_proc_data, ['sampling_rates', 'ECG_final'])
-        hr_signal = safe_get(subject_proc_data, ['signal', 'wrist', 'BVP']); hr_fs = safe_get(subject_proc_data, ['sampling_rates', 'BVP_final'])
+        ecg_signal = safe_get(subject_proc_data, ['signal', 'chest', 'ECG'])
+        ecg_fs = safe_get(subject_proc_data, ['sampling_rates', 'ECG_final']) or safe_get(subject_proc_data, ['sampling_rates', 'ECG'])
+        
+        hr_signal = safe_get(subject_proc_data, ['signal', 'wrist', 'BVP'])
+        hr_fs = safe_get(subject_proc_data, ['sampling_rates', 'BVP_final']) or safe_get(subject_proc_data, ['sampling_rates', 'BVP'])
+        
         if nk is None: log.warning(f"{worker_log_prefix} NeuroKit2 not available, cannot calculate HRV.")
         elif ecg_signal is not None and ecg_fs is not None:
             log.debug(f"{worker_log_prefix} Calculating HRV from ECG (Fs={ecg_fs}Hz)...")
@@ -234,16 +232,18 @@ def calculate_subject_static_features(
     # 2. EDA
     if calc_eda:
         for device in ['chest', 'wrist']:
-            eda_signal = safe_get(subject_proc_data, ['signal', device, 'EDA']); eda_fs = safe_get(subject_proc_data, ['sampling_rates', 'EDA_final']);
-            if eda_fs is None: eda_fs = safe_get(subject_proc_data, ['sampling_rates', 'eda_final'])
+            eda_signal = safe_get(subject_proc_data, ['signal', device, 'EDA'])
+            eda_fs = safe_get(subject_proc_data, ['sampling_rates', 'EDA_final']) or safe_get(subject_proc_data, ['sampling_rates', 'EDA']) or safe_get(subject_proc_data, ['sampling_rates', 'eda_final']) or safe_get(subject_proc_data, ['sampling_rates', 'eda'])
+            
             if eda_signal is not None and eda_fs is not None:
                 prefix = f"{device}_EDA"; log.debug(f"{worker_log_prefix} Calculating EDA features for {device} (Fs={eda_fs}Hz)..."); eda_feats = calculate_eda_features(eda_signal, eda_fs, prefix); all_static_features.update(eda_feats); log.debug(f"{worker_log_prefix} EDA features ({device}) added ({len(eda_feats)} features).")
 
     # 3. ACC
     if calc_acc:
         for device in ['chest', 'wrist']:
-            acc_signal = safe_get(subject_proc_data, ['signal', device, 'ACC']); acc_fs = safe_get(subject_proc_data, ['sampling_rates', 'ACC_final'])
-            if acc_fs is None: acc_fs = safe_get(subject_proc_data, ['sampling_rates', 'acc_final'])
+            acc_signal = safe_get(subject_proc_data, ['signal', device, 'ACC'])
+            acc_fs = safe_get(subject_proc_data, ['sampling_rates', 'ACC_final']) or safe_get(subject_proc_data, ['sampling_rates', 'ACC']) or safe_get(subject_proc_data, ['sampling_rates', 'acc_final']) or safe_get(subject_proc_data, ['sampling_rates', 'acc'])
+            
             if acc_signal is not None and acc_fs is not None:
                 prefix = f"{device}_ACC"; log.debug(f"{worker_log_prefix} Calculating ACC features for {device} (Fs={acc_fs}Hz)...")
                 acc_stat_feats = calculate_basic_stats(acc_signal, prefix); all_static_features.update(acc_stat_feats); log.debug(f"{worker_log_prefix} ACC basic stats ({device}) added ({len(acc_stat_feats)} features).")
@@ -253,14 +253,17 @@ def calculate_subject_static_features(
     # 4. TEMP
     if calc_temp:
         for device in ['chest', 'wrist']:
-            temp_signal = safe_get(subject_proc_data, ['signal', device, 'TEMP']); temp_fs = safe_get(subject_proc_data, ['sampling_rates', 'TEMP_final']);
-            if temp_fs is None: temp_fs = safe_get(subject_proc_data, ['sampling_rates', 'temp_final'])
+            temp_signal = safe_get(subject_proc_data, ['signal', device, 'TEMP'])
+            temp_fs = safe_get(subject_proc_data, ['sampling_rates', 'TEMP_final']) or safe_get(subject_proc_data, ['sampling_rates', 'TEMP']) or safe_get(subject_proc_data, ['sampling_rates', 'temp_final']) or safe_get(subject_proc_data, ['sampling_rates', 'temp'])
+            
             if temp_signal is not None and temp_fs is not None:
                 prefix = f"{device}_TEMP"; log.debug(f"{worker_log_prefix} Calculating TEMP features for {device} (Fs={temp_fs}Hz)..."); temp_stats = calculate_basic_stats(temp_signal, prefix); temp_slope = calculate_temp_slope(temp_signal, temp_fs, prefix); all_static_features.update(temp_stats); all_static_features.update(temp_slope); log.debug(f"{worker_log_prefix} TEMP features ({device}) added ({len(temp_stats)+len(temp_slope)} features).")
 
     # 5. RESP (Placeholder)
     if calc_resp:
-        resp_signal = safe_get(subject_proc_data, ['signal', 'chest', 'RESP']); resp_fs = safe_get(subject_proc_data, ['sampling_rates', 'RESP_final'])
+        resp_signal = safe_get(subject_proc_data, ['signal', 'chest', 'RESP'])
+        resp_fs = safe_get(subject_proc_data, ['sampling_rates', 'RESP_final']) or safe_get(subject_proc_data, ['sampling_rates', 'RESP'])
+        
         if resp_signal is not None and resp_fs is not None:
              prefix = "chest_RESP"; log.debug(f"{worker_log_prefix} Calculating RESP features (Fs={resp_fs}Hz)...")
              resp_stats = calculate_basic_stats(resp_signal, prefix); all_static_features.update(resp_stats); log.debug(f"{worker_log_prefix} RESP basic stats added ({len(resp_stats)} features).")

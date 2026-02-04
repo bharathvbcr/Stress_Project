@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, Tuple
 # --- Import necessary components from your project ---
 # Adjust paths as needed if tuning.py is not in the root directory
 try:
-    from utils import load_config, safe_get, load_preprocessed_data
+    from utils import load_config, safe_get, load_preprocessed_data, setup_logging
     # Import the newly refactored functions for data splits and loaders
     from data_pipeline import get_data_splits, create_pytorch_dataloaders
     from models import get_model # Use the get_model factory function
@@ -22,6 +22,7 @@ except ImportError as e:
     raise
 
 log = logging.getLogger(__name__)
+setup_logging()
 
 # ==============================================================================
 # == Global Data Loading (Load Once) ==

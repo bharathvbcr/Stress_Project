@@ -7,21 +7,11 @@ import logging
 from typing import Dict, Tuple, List, Optional, Any, Union
 from torch.utils.data import DataLoader
 
-# Import functions from the new modules
-try:
-    from windowing import create_all_subject_windows
-    from data_splitting import perform_group_split
-    from sampling import apply_sampling
-    from pytorch_datasets import create_pytorch_dataloaders
-    from utils import safe_get # Keep utils import
-except ImportError as e:
-    logging.critical(f"Failed to import necessary modules (windowing, data_splitting, sampling, pytorch_datasets, utils): {e}")
-    # Define dummy functions if imports fail
-    def create_all_subject_windows(*args, **kwargs): logging.error("Dummy create_all_subject_windows called!"); raise ImportError("create_all_subject_windows not found.")
-    def perform_group_split(*args, **kwargs): logging.error("Dummy perform_group_split called!"); raise ImportError("perform_group_split not found.")
-    def apply_sampling(*args, **kwargs): logging.error("Dummy apply_sampling called!"); raise ImportError("apply_sampling not found.")
-    def create_pytorch_dataloaders(*args, **kwargs): logging.error("Dummy create_pytorch_dataloaders called!"); return None, None, None
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
+from windowing import create_all_subject_windows
+from data_splitting import perform_group_split
+from sampling import apply_sampling
+from pytorch_datasets import create_pytorch_dataloaders
+from utils import safe_get
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +129,7 @@ def _calculate_input_dims(
     # --- Static Dimension ---
     # Calculate based on the length of 'static_features_to_use' in config (excluding comments)
     static_features_to_use_config = [
-        f for f in safe_get(config, ['static_features_to_use'], []) if not f.startswith("comment")
+        f for f in safe_get(config, ['static_features_to_use'], [])
     ]
     input_dim_static = len(static_features_to_use_config)
     log.info(f"Combined Static Features specified ({input_dim_static}): {static_features_to_use_config}")
@@ -205,6 +195,7 @@ def get_data_splits(
     # --- Step 3: Split Data ---
     try:
         train_data, val_data, test_data = perform_group_split(all_data_lists, config)
+        log.info(f"Split results - Train: {len(train_data[2])} windows, Val: {len(val_data[2])} windows, Test: {len(test_data[2])} windows")
     except ValueError as e:
         log.error(f"get_data_splits: Error during data splitting: {e}. Aborting.")
         return None, None, None, input_dim_sequence, input_dim_static
@@ -215,6 +206,7 @@ def get_data_splits(
     # --- Step 4: Apply Sampling (to Training Data Only) ---
     try:
         train_data_sampled = apply_sampling(train_data, config)
+        log.info(f"Training set size after sampling: {len(train_data_sampled[2])} windows (Original: {len(train_data[2])})")
     except Exception as e:
         log.error(f"get_data_splits: Unexpected error during sampling: {e}", exc_info=True)
         return None, None, None, input_dim_sequence, input_dim_static

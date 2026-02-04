@@ -11,17 +11,8 @@ from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
 import collections
 
-# --- Import custom loss and utils ---
-try:
-    from losses import FocalLoss # Import custom Focal Loss if used
-    from utils import safe_get
-except ImportError:
-    logging.error("Could not import FocalLoss or safe_get. Ensure losses.py and utils.py are accessible.")
-    # Define dummy fallbacks if necessary for the script to load
-    class FocalLoss(nn.Module):
-        def __init__(self, *args, **kwargs): super().__init__(); logging.critical("Dummy FocalLoss used!"); raise ImportError("FocalLoss not defined")
-        def forward(self, inputs, targets): raise NotImplementedError
-    def safe_get(data_dict, keys, default=None): temp = data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
+from losses import FocalLoss
+from utils import safe_get
 
 log = logging.getLogger(__name__)
 
@@ -212,6 +203,8 @@ def _train_one_epoch(
     model.train() # Set model to training mode
     running_loss = 0.0
     num_samples_processed = 0
+    total_batches = 0
+    failed_batches = 0
 
     # Iterate over batches in the training dataloader
     for i, batch_data in enumerate(dataloader):
@@ -229,6 +222,7 @@ def _train_one_epoch(
 
         batch_size = seq_features.size(0)
         if batch_size == 0: continue # Skip empty batches
+        total_batches += 1
 
         # --- Forward and Backward Pass ---
         optimizer.zero_grad() # Reset gradients
@@ -239,6 +233,7 @@ def _train_one_epoch(
         except Exception as model_e:
             log.error(f"Epoch [{epoch_num+1}/{total_epochs}] Batch {i}: Model forward pass error: {model_e}", exc_info=True)
             log.error(f"  Input Shapes - Seq: {seq_features.shape}, Static: {static_features.shape if static_features is not None else 'None'}")
+            failed_batches += 1
             continue # Skip this batch if model fails
 
         # Loss calculation
@@ -249,6 +244,7 @@ def _train_one_epoch(
         except Exception as loss_e:
              log.error(f"Epoch [{epoch_num+1}/{total_epochs}] Batch {i}: Loss calculation error: {loss_e}", exc_info=True)
              log.error(f"  Output shape: {outputs.shape}, Label shape: {labels.shape}, Label dtype: {labels.dtype}")
+             failed_batches += 1
              continue # Skip this batch if loss calculation fails
 
         # Backward pass: Calculate gradients
@@ -256,6 +252,7 @@ def _train_one_epoch(
             loss.backward()
         except Exception as backward_e:
             log.error(f"Epoch [{epoch_num+1}/{total_epochs}] Batch {i}: Backward pass error: {backward_e}", exc_info=True)
+            failed_batches += 1
             continue # Skip optimizer step if backward pass fails
 
         # Optimizer step: Update model weights
@@ -270,6 +267,10 @@ def _train_one_epoch(
         num_samples_processed += batch_size
 
     # --- Epoch End ---
+    if total_batches > 0 and failed_batches > total_batches * 0.5:
+        log.error(f"Epoch [{epoch_num+1}/{total_epochs}]: {failed_batches}/{total_batches} batches failed (>50%). Epoch unreliable.")
+        return np.nan
+
     if num_samples_processed == 0:
         log.error(f"Epoch [{epoch_num+1}/{total_epochs}]: No samples processed in training epoch.")
         return np.nan # Return NaN if no samples were processed
@@ -442,6 +443,18 @@ def train_model(
 
     optimizer = _get_optimizer(model, config) # Get optimizer based on config
 
+    # --- Learning Rate Scheduler ---
+    lr_scheduler_config = safe_get(config, ['training_config', 'lr_scheduler'], {})
+    scheduler = None
+    if lr_scheduler_config.get('enabled', True):
+        scheduler_factor = lr_scheduler_config.get('factor', 0.5)
+        scheduler_patience = lr_scheduler_config.get('patience', 3)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=scheduler_factor,
+            patience=scheduler_patience, verbose=False
+        )
+        log.info(f"LR Scheduler: ReduceLROnPlateau (factor={scheduler_factor}, patience={scheduler_patience})")
+
     # --- Early Stopping Initialization ---
     best_monitor_value = float('inf') # Initialize for minimizing validation loss
     epochs_no_improve = 0
@@ -472,9 +485,11 @@ def train_model(
 
     # --- Log Training Setup ---
     model.to(device) # Ensure model is on the correct device before training
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     log.info(f"Training Configuration:")
     log.info(f"  Device: {device}")
     log.info(f"  Model Type: {model.__class__.__name__}")
+    log.info(f"  Trainable Parameters: {num_params:,}")
     log.info(f"  Loss function: {type(criterion).__name__}")
     log.info(f"  Optimizer: {type(optimizer).__name__}")
     log.info(f"  Max epochs: {epochs}")
@@ -538,6 +553,14 @@ def train_model(
                      log.info(f"Early stopping triggered after {epoch + 1} epochs.")
                      break # Exit training loop
         # --- End Early Stopping ---
+
+        # --- Step LR Scheduler ---
+        if scheduler is not None and avg_val_loss is not None and not np.isnan(avg_val_loss):
+            old_lr = optimizer.param_groups[0]['lr']
+            scheduler.step(avg_val_loss)
+            new_lr = optimizer.param_groups[0]['lr']
+            if new_lr != old_lr:
+                log.info(f"  LR reduced: {old_lr:.6f} -> {new_lr:.6f}")
 
         # Handle case where training loss becomes NaN (e.g., exploding gradients)
         if np.isnan(avg_train_loss):

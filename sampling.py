@@ -6,12 +6,7 @@ import collections
 import random
 from typing import Tuple, List, Dict, Any
 
-# Assuming utils.py is available
-try:
-    from utils import safe_get
-except ImportError:
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
-    logging.warning("Could not import 'safe_get' from 'utils'. Using basic fallback in sampling.py.")
+from utils import safe_get
 
 # Attempt to import SMOTE from imbalanced-learn
 try:
@@ -22,6 +17,29 @@ except ImportError:
     logging.warning("SMOTE sampling will not be available. Falling back to random oversampling if SMOTE is selected.")
 
 log = logging.getLogger(__name__)
+
+
+def _random_oversample(
+    X_train_seq_list, X_train_static_list, y_train_list,
+    subj_ids_train_list, starts_train_list,
+    y_train_np_pre, minority_class_label, n_majority, n_minority,
+    resampled_lists
+):
+    """Helper: applies random oversampling of the minority class to balance classes."""
+    X_seq_res, X_static_res, y_res, subj_res, starts_res = resampled_lists
+    minority_indices = np.where(y_train_np_pre == minority_class_label)[0]
+    n_samples_to_add = n_majority - n_minority
+    log.info(f"Random Oversampling: Adding {n_samples_to_add} samples from minority class ({minority_class_label}).")
+    if len(minority_indices) > 0:
+        oversample_indices = np.random.choice(minority_indices, size=n_samples_to_add, replace=True)
+        X_seq_res.extend([X_train_seq_list[i] for i in oversample_indices])
+        X_static_res.extend([X_train_static_list[i] for i in oversample_indices])
+        y_res.extend([y_train_list[i] for i in oversample_indices])
+        subj_res.extend([subj_ids_train_list[i] for i in oversample_indices])
+        starts_res.extend([starts_train_list[i] for i in oversample_indices])
+    else:
+        log.error("Minority indices array is empty, cannot perform random oversampling.")
+
 
 def apply_sampling(
     train_data: Tuple[List, ...], # Output from data_splitting.py
@@ -83,45 +101,30 @@ def apply_sampling(
     subj_ids_train_resampled_list = list(subj_ids_train_list)
     starts_train_resampled_list = list(starts_train_list)
 
+    resampled_lists = (X_train_seq_resampled_list, X_train_static_resampled_list,
+                       y_train_resampled_list, subj_ids_train_resampled_list,
+                       starts_train_resampled_list)
+
     # --- Random Oversampling ---
     if sampling_method == 'random':
         log.info("Using Random Oversampling.")
-        # Find indices of minority class samples
-        minority_indices = np.where(y_train_np_pre == minority_class_label)[0]
-        n_samples_to_add = n_majority - n_minority
-        log.info(f"Random Oversampling: Adding {n_samples_to_add} samples from minority class ({minority_class_label}).")
-
-        if len(minority_indices) > 0:
-            # Randomly choose minority samples with replacement
-            oversample_indices = np.random.choice(minority_indices, size=n_samples_to_add, replace=True)
-            # Append the selected samples to the lists
-            X_train_seq_resampled_list.extend([X_train_seq_list[i] for i in oversample_indices])
-            X_train_static_resampled_list.extend([X_train_static_list[i] for i in oversample_indices])
-            y_train_resampled_list.extend([y_train_list[i] for i in oversample_indices])
-            # Assign a specific ID or keep original for oversampled data? Keep original for now.
-            subj_ids_train_resampled_list.extend([subj_ids_train_list[i] for i in oversample_indices])
-            starts_train_resampled_list.extend([starts_train_list[i] for i in oversample_indices])
-        else:
-            # This should not happen if n_minority > 0
-            log.error("Minority indices array is empty, cannot perform random oversampling.")
+        _random_oversample(
+            X_train_seq_list, X_train_static_list, y_train_list,
+            subj_ids_train_list, starts_train_list,
+            y_train_np_pre, minority_class_label, n_majority, n_minority,
+            resampled_lists
+        )
 
     # --- SMOTE (Synthetic Minority Over-sampling Technique) ---
     elif sampling_method == 'smote':
         if SMOTE is None:
             log.error("SMOTE selected but imbalanced-learn library not found. Falling back to random oversampling.")
-            # --- Fallback to Random Oversampling Logic ---
-            minority_indices = np.where(y_train_np_pre == minority_class_label)[0]
-            n_samples_to_add = n_majority - n_minority
-            log.info(f"Random Oversampling (Fallback): Adding {n_samples_to_add} samples from minority class ({minority_class_label}).")
-            if len(minority_indices) > 0:
-                oversample_indices = np.random.choice(minority_indices, size=n_samples_to_add, replace=True)
-                X_train_seq_resampled_list.extend([X_train_seq_list[i] for i in oversample_indices])
-                X_train_static_resampled_list.extend([X_train_static_list[i] for i in oversample_indices])
-                y_train_resampled_list.extend([y_train_list[i] for i in oversample_indices])
-                subj_ids_train_resampled_list.extend([subj_ids_train_list[i] for i in oversample_indices])
-                starts_train_resampled_list.extend([starts_train_list[i] for i in oversample_indices])
-            else: log.error("Minority indices array is empty, cannot perform random oversampling fallback.")
-            # --- End Fallback ---
+            _random_oversample(
+                X_train_seq_list, X_train_static_list, y_train_list,
+                subj_ids_train_list, starts_train_list,
+                y_train_np_pre, minority_class_label, n_majority, n_minority,
+                resampled_lists
+            )
         else:
             log.info("Using SMOTE.")
             try:
@@ -184,55 +187,32 @@ def apply_sampling(
             except ValueError as smote_e:
                  log.error(f"SMOTE failed: {smote_e}. This often happens if minority samples < k_neighbors+1.")
                  log.error("Falling back to random oversampling.")
-                 # --- Fallback to Random Oversampling Logic ---
-                 minority_indices = np.where(y_train_np_pre == minority_class_label)[0]
-                 n_samples_to_add = n_majority - n_minority
-                 log.info(f"Random Oversampling (Fallback): Adding {n_samples_to_add} samples from minority class ({minority_class_label}).")
-                 if len(minority_indices) > 0:
-                     oversample_indices = np.random.choice(minority_indices, size=n_samples_to_add, replace=True)
-                     X_train_seq_resampled_list.extend([X_train_seq_list[i] for i in oversample_indices])
-                     X_train_static_resampled_list.extend([X_train_static_list[i] for i in oversample_indices])
-                     y_train_resampled_list.extend([y_train_list[i] for i in oversample_indices])
-                     subj_ids_train_resampled_list.extend([subj_ids_train_list[i] for i in oversample_indices])
-                     starts_train_resampled_list.extend([starts_train_list[i] for i in oversample_indices])
-                 else: log.error("Minority indices array is empty, cannot perform random oversampling fallback.")
-                 # --- End Fallback ---
+                 _random_oversample(
+                     X_train_seq_list, X_train_static_list, y_train_list,
+                     subj_ids_train_list, starts_train_list,
+                     y_train_np_pre, minority_class_label, n_majority, n_minority,
+                     resampled_lists
+                 )
 
             except Exception as e:
                 log.error(f"Unexpected error during SMOTE: {e}", exc_info=True)
                 log.error("Falling back to random oversampling.")
-                # --- Fallback to Random Oversampling Logic ---
-                # (Duplicate code - consider refactoring into a separate helper if used frequently)
-                minority_indices = np.where(y_train_np_pre == minority_class_label)[0]
-                n_samples_to_add = n_majority - n_minority
-                log.info(f"Random Oversampling (Fallback): Adding {n_samples_to_add} samples from minority class ({minority_class_label}).")
-                if len(minority_indices) > 0:
-                    oversample_indices = np.random.choice(minority_indices, size=n_samples_to_add, replace=True)
-                    X_train_seq_resampled_list.extend([X_train_seq_list[i] for i in oversample_indices])
-                    X_train_static_resampled_list.extend([X_train_static_list[i] for i in oversample_indices])
-                    y_train_resampled_list.extend([y_train_list[i] for i in oversample_indices])
-                    subj_ids_train_resampled_list.extend([subj_ids_train_list[i] for i in oversample_indices])
-                    starts_train_resampled_list.extend([starts_train_list[i] for i in oversample_indices])
-                else: log.error("Minority indices array is empty, cannot perform random oversampling fallback.")
-                # --- End Fallback ---
+                _random_oversample(
+                    X_train_seq_list, X_train_static_list, y_train_list,
+                    subj_ids_train_list, starts_train_list,
+                    y_train_np_pre, minority_class_label, n_majority, n_minority,
+                    resampled_lists
+                )
 
     # --- Unknown Sampling Method ---
     else:
         log.error(f"Unknown sampling method '{sampling_method}' specified in config. Using random oversampling as fallback.")
-        # --- Fallback to Random Oversampling Logic ---
-        # (Duplicate code)
-        minority_indices = np.where(y_train_np_pre == minority_class_label)[0]
-        n_samples_to_add = n_majority - n_minority
-        log.info(f"Random Oversampling (Fallback): Adding {n_samples_to_add} samples from minority class ({minority_class_label}).")
-        if len(minority_indices) > 0:
-            oversample_indices = np.random.choice(minority_indices, size=n_samples_to_add, replace=True)
-            X_train_seq_resampled_list.extend([X_train_seq_list[i] for i in oversample_indices])
-            X_train_static_resampled_list.extend([X_train_static_list[i] for i in oversample_indices])
-            y_train_resampled_list.extend([y_train_list[i] for i in oversample_indices])
-            subj_ids_train_resampled_list.extend([subj_ids_train_list[i] for i in oversample_indices])
-            starts_train_resampled_list.extend([starts_train_list[i] for i in oversample_indices])
-        else: log.error("Minority indices array is empty, cannot perform random oversampling fallback.")
-        # --- End Fallback ---
+        _random_oversample(
+            X_train_seq_list, X_train_static_list, y_train_list,
+            subj_ids_train_list, starts_train_list,
+            y_train_np_pre, minority_class_label, n_majority, n_minority,
+            resampled_lists
+        )
 
     # --- Log Final Distribution ---
     log.info(f"Training set AFTER sampling ({sampling_method}): {len(y_train_resampled_list)} windows")

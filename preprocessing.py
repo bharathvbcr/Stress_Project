@@ -7,17 +7,9 @@ import time
 import numpy as np
 from typing import Dict, Any, Optional, Tuple, List, Union
 
-# Import functions from the new modules
-try:
-    from signal_processing import resample_and_align_subject_signals
-    from feature_extraction import run_static_feature_extraction_parallel
-    from utils import safe_get # Keep utils import for save paths etc.
-except ImportError as e:
-    logging.critical(f"Failed to import necessary modules (signal_processing, feature_extraction, utils): {e}")
-    # Define dummy functions if imports fail, allowing the script to load but fail gracefully later
-    def resample_and_align_subject_signals(*args, **kwargs): logging.error("Dummy resample_and_align_subject_signals called!"); return None
-    def run_static_feature_extraction_parallel(*args, **kwargs): logging.error("Dummy run_static_feature_extraction_parallel called!"); return {}, {}
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
+from signal_processing import resample_and_align_subject_signals
+from feature_extraction import run_static_feature_extraction_parallel
+from utils import safe_get
 
 # Import joblib safely for saving
 try:
@@ -128,7 +120,7 @@ def preprocess_all_subjects(
     subjects_failed_initial_processing = [] # Track subjects failing resampling/alignment
 
     # --- Step 1: Signal Processing (Resampling & Alignment) ---
-    log.info("--- Step 1: Applying Signal Processing (Resampling & Alignment) ---")
+    log.info(f"--- Step 1: Applying Signal Processing (Resampling & Alignment) on {len(subjects_loaded)} subjects ---")
     for subject_id in subjects_loaded:
         if subject_id not in all_subject_data:
             log.warning(f"[S{subject_id}] Not found in loaded raw data dictionary. Skipping preprocessing.")
@@ -154,8 +146,12 @@ def preprocess_all_subjects(
     # --- Step 2: Static Feature Extraction (Parallel) ---
     # Call the function from the feature_extraction module
     # Run only on subjects that passed Step 1
+    # IMPORTANT: We pass 'all_subject_data' (RAW data) instead of 'processed_data'
+    # This allows features like HRV to be calculated on the original high-frequency signals.
     try:
-        static_features_results, r_peak_results = run_static_feature_extraction_parallel(processed_data, config)
+        # Filter raw data to include only successfully loaded subjects
+        raw_data_subset = {k: v for k, v in all_subject_data.items() if k in processed_data}
+        static_features_results, r_peak_results = run_static_feature_extraction_parallel(raw_data_subset, config)
     except Exception as e:
         log.error(f"Critical error during parallel feature extraction setup/execution: {e}", exc_info=True)
         static_features_results, r_peak_results = {}, {} # Return empty dicts on major failure

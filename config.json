@@ -75,11 +75,13 @@
         "calculate_interaction_features": true 
     },
 
+    "_static_features_comments": [
+        "List of calculated static features to use as input to the model's FC layer.",
+        "Order matters if the model expects a specific order.",
+        "Ensure these names match the output keys from _process_single_subject_static_features.",
+        "HRV features require NeuroKit2 and ECG data."
+    ],
     "static_features_to_use": [
-        "comment", "List of calculated static features to use as input to the model's FC layer.",
-        "comment2", "Order matters if the model expects a specific order.",
-        "comment3", "Ensure these names match the output keys from _process_single_subject_static_features.",
-        "comment4", "HRV features require NeuroKit2 and ECG data.",
         "HRV_MeanNN", "HRV_SDNN", "HRV_RMSSD", "HRV_pNN50", "HRV_LFHF", "HRV_HF", "HRV_LF",
         "HR_Mean", "HR_Std", 
         "chest_EDA_Mean", "chest_EDA_Std", "SCR_Peaks_N", "SCR_Peaks_Amplitude_Mean", 
@@ -133,7 +135,12 @@
         "loss_function": "bce", 
         "focal_loss_alpha": 0.5, 
         "focal_loss_gamma": 2.0, 
-        "sampling_strategy": "smote" 
+        "sampling_strategy": "smote",
+        "lr_scheduler": {
+            "enabled": true,
+            "factor": 0.5,
+            "patience": 3
+        }
     },
 
     "tuning_config": {

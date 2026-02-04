@@ -6,12 +6,7 @@ import logging
 import collections
 from typing import Dict, Tuple, List, Optional, Any, Union
 
-# Assuming utils.py is available
-try:
-    from utils import safe_get
-except ImportError:
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
-    logging.warning("Could not import 'safe_get' from 'utils'. Using basic fallback in windowing.py.")
+from utils import safe_get
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +58,7 @@ def create_all_subject_windows(
     label_map = safe_get(config, ['label_mapping'], {})
     # Get the list of static features to actually use from the config
     static_features_to_use_config = [
-        f for f in safe_get(config, ['static_features_to_use'], []) if not f.startswith("comment")
+        f for f in safe_get(config, ['static_features_to_use'], [])
     ]
     # Ensure the number of static features to use matches the expected input_dim_static
     if len(static_features_to_use_config) != input_dim_static:
@@ -269,12 +264,12 @@ def create_all_subject_windows(
                  continue
 
             # --- Determine Window Label ---
-            # Label is 1 if *any* sample within the window's binary label is 1 (stress)
+            # Label is 1 if majority (>50%) of samples in window are stress
             label_segment = binary_labels[start_idx:end_idx]
             if label_segment.size == 0: # Should not happen if window is possible
                 log.error(f"S{subj_id} Win {i}: Label segment is empty for start {start_idx}, end {end_idx}. Skipping window.")
                 continue
-            assigned_label = np.int32(1) if np.any(label_segment == 1) else np.int32(0)
+            assigned_label = np.int32(1) if np.mean(label_segment == 1) > 0.5 else np.int32(0)
 
             # --- Append Data to Lists ---
             all_windows_seq_features_list.append(window_seq_vector)

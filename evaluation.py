@@ -25,29 +25,10 @@ except ImportError:
     logging.error("`shap` library not found. pip install shap")
     logging.warning("Feature importance calculation using SHAP will not be available.")
 
-# --- Import visualization functions ---
-try:
-    # Import the plotting functions needed within evaluation (ROC/PR)
-    from visualization import plot_roc_curve, plot_precision_recall_curve
-except ImportError:
-    logging.error("Could not import plotting functions from visualization.py. ROC/PR plots will not be generated directly by evaluate_model.")
-    # Define dummy functions if import fails to prevent crashes
-    def plot_roc_curve(*args, **kwargs): pass
-    def plot_precision_recall_curve(*args, **kwargs): pass
+from visualization import plot_roc_curve, plot_precision_recall_curve
+from utils import safe_get
 
 log = logging.getLogger(__name__)
-
-# --- Utility function for safe dictionary access ---
-# Keep this local or ensure it's consistently imported from utils
-def safe_get(dictionary, keys, default=None):
-    """ Safely access nested dictionary values. """
-    result = dictionary
-    for key in keys:
-        try:
-            if isinstance(result, dict): result = result[key]
-            else: return default
-        except (KeyError, TypeError, IndexError): return default
-    return result
 
 # --- Find Best Threshold ---
 def find_best_threshold(
@@ -166,7 +147,7 @@ def evaluate_model(
     config: Dict[str, Any], # Main config for label names etc.
     output_dir: str, # Directory to save plots
     set_name: str = "Evaluation", # Name for logging/plotting (e.g., "Validation", "Test")
-    threshold: float = 0.5 # Probability threshold for classification
+    threshold: Optional[float] = 0.5 # Probability threshold for classification; None = auto-optimize via F1
 ) -> Optional[Dict[str, Any]]:
     """
     Evaluates the trained model on a given dataset (e.g., validation or test).
@@ -181,7 +162,9 @@ def evaluate_model(
         config (Dict[str, Any]): Main configuration dictionary.
         output_dir (str): Directory to save generated plots.
         set_name (str, optional): Name of the dataset being evaluated. Defaults to "Evaluation".
-        threshold (float, optional): Probability threshold for converting probabilities to binary predictions. Defaults to 0.5.
+        threshold (float, optional): Probability threshold for converting probabilities
+            to binary predictions. Defaults to 0.5. Pass None to auto-select the
+            threshold that maximizes F1 score.
 
     Returns:
         Optional[Dict[str, Any]]: A dictionary containing evaluation metrics and results,
@@ -190,7 +173,10 @@ def evaluate_model(
                                   'avg_precision', 'classification_report', 'confusion_matrix',
                                   'threshold_used', 'probabilities', 'labels'.
     """
-    log.info(f"--- Starting Model Evaluation on {set_name} Set (Threshold: {threshold:.4f}) ---")
+    auto_threshold = threshold is None
+    if threshold is None:
+        threshold = 0.5  # temporary default; will be replaced after collecting probs
+    log.info(f"--- Starting Model Evaluation on {set_name} Set (Threshold: {threshold:.4f}{', auto-optimize enabled' if auto_threshold else ''}) ---")
     if not dataloader:
         log.error(f"{set_name} DataLoader is None. Cannot evaluate.")
         return None
@@ -265,6 +251,13 @@ def evaluate_model(
     all_preds_np = np.array(all_preds_list)
     all_labels_np = np.array(all_labels_list)
     all_probs_np = np.array(all_probs_list)
+
+    # Auto-optimize threshold if requested
+    if auto_threshold:
+        threshold, best_f1 = find_best_threshold(all_probs_np, all_labels_np, metric='f1')
+        log.info(f"{set_name}: Auto-optimized threshold = {threshold:.4f} (F1 = {best_f1:.4f})")
+        # Recompute predictions with the optimized threshold
+        all_preds_np = (all_probs_np > threshold).astype(int)
 
     # Calculate average loss if criterion was provided and loss was calculated
     avg_loss = (total_loss / num_samples_processed) if criterion and num_samples_processed > 0 else np.nan
@@ -541,7 +534,7 @@ def calculate_shap_importance(
     num_seq_features = model.input_dim_sequence if hasattr(model, 'input_dim_sequence') else (mean_abs_shap_seq.shape[1] if mean_abs_shap_seq is not None else 0)
     seq_feature_names = [f"SeqFeat_{i}" for i in range(num_seq_features)] # Placeholder names like SeqFeat_0, SeqFeat_1...
     # Static features: Get names from config
-    static_feature_names = [f for f in safe_get(config, ['static_features_to_use'], []) if not f.startswith("comment")]
+    static_feature_names = safe_get(config, ['static_features_to_use'], [])
 
     # Validate static feature names against SHAP output dimension
     if shap_values_static is not None and len(static_feature_names) != shap_values_static.shape[1]:

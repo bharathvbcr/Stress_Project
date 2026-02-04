@@ -9,12 +9,7 @@ import multiprocessing
 import collections
 from typing import Dict, Tuple, List, Optional, Any, Union
 
-# Assuming utils.py is available
-try:
-    from utils import safe_get
-except ImportError:
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
-    logging.warning("Could not import 'safe_get' from 'utils'. Using basic fallback in pytorch_datasets.py.")
+from utils import safe_get
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +80,7 @@ class SequenceWindowDataset(Dataset):
 
             # Stack validated sequence windows into a single tensor
             self.sequence_features = torch.tensor(np.stack(processed_seq_features, axis=0), dtype=torch.float32)
+            del processed_seq_features # Free memory immediately
             log.info(f"Stacked {len(sequence_features)} sequence feature windows.")
         except Exception as e:
             log.error(f"Error processing or stacking sequence features: {e}", exc_info=True)
@@ -377,5 +373,13 @@ def create_pytorch_dataloaders(
         log.error(f"Failed to create Datasets or DataLoaders: {e}", exc_info=True)
         # Return None for all loaders on critical error
         return None, None, None
+
+    # --- Validate that critical loaders were created ---
+    if train_loader is None:
+        raise ValueError("Training DataLoader is empty. Cannot proceed with training.")
+    if val_loader is None:
+        raise ValueError("Validation DataLoader is empty. Early stopping and model selection require validation data.")
+    if test_loader is None:
+        log.warning("Test DataLoader is empty. Final evaluation will not be possible.")
 
     return train_loader, val_loader, test_loader

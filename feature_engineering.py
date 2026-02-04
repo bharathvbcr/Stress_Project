@@ -4,12 +4,7 @@ import pandas as pd
 import logging
 from typing import Dict, Any, Tuple, List, Optional, Union
 
-# Assuming utils.py is available
-try:
-    from utils import safe_get
-except ImportError:
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
-    logging.warning("Could not import 'safe_get' from 'utils'. Using basic fallback in feature_engineering.py.")
+from utils import safe_get
 
 log = logging.getLogger(__name__)
 

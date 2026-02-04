@@ -10,14 +10,7 @@ from typing import Dict, Any, Optional, Tuple, List, Union
 import torch # Only needed if directly plotting tensors, otherwise remove
 from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
 
-# Assuming utils.py is available
-try:
-    from utils import get_sampling_rate, safe_get
-except ImportError:
-    # Fallback implementations if utils not found
-    def safe_get(data_dict, keys, default=None): temp=data_dict; [temp := temp.get(i,{}) if isinstance(temp,dict) else default for i in keys]; return temp if temp else default
-    def get_sampling_rate(*args): return None
-    logging.warning("Could not import from 'utils'. Using basic fallbacks in visualization.py.")
+from utils import get_sampling_rate, safe_get
 
 log = logging.getLogger(__name__)
 

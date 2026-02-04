@@ -1,39 +1,60 @@
 # Stress Detection Project
 
-This project focuses on the detection of stress using physiological signals collected from wearable devices (chest and wrist). It implements a deep learning pipeline that processes multi-modal data (ECG, EDA, EMG, ACC, TEMP, BVP), extracts features, and classifies stress states using advanced neural network architectures.
+This project implements a comprehensive deep learning pipeline for detecting stress using physiological signals collected from wearable devices (WESAD and NURSE datasets). It features a modular architecture handling data loading, advanced signal preprocessing, feature extraction, and classification using state-of-the-art neural networks.
 
-## Project Overview
+## 🚀 Key Features
 
-The system is designed to work with standard stress detection datasets like **WESAD** (Wearable Stress and Affect Detection) and **NURSE**. It includes a robust data processing pipeline and configurable deep learning models to classify data into states such as "baseline", "stress", and "transient".
+*   **Multi-Modal Data Fusion:** Integrates data from chest (ECG, EDA, EMG, ACC, Temp) and wrist (BVP, EDA, ACC, Temp) devices.
+*   **Advanced Models:**
+    *   **StressCNNLSTM:** Hybrid architecture combining 1D-CNNs for local feature extraction, Bi-LSTMs for temporal dynamics, and Attention mechanisms.
+    *   **StressTransformer:** Transformer-based encoder for capturing long-range dependencies.
+    *   **StressLSTM:** Baseline architecture with late fusion.
+*   **Robust Preprocessing:**
+    *   Automatic signal resampling and alignment.
+    *   **Bio-signal Analysis:** Computes HRV (Heart Rate Variability), EDA (Phasic/Tonic), and statistical features using `neurokit2` and `scikit-learn`.
+    *   **Parallel Processing:** Optimized feature extraction using `joblib`.
+*   **Imbalance Handling:** Implements **SMOTE** (Synthetic Minority Over-sampling Technique) and **Focal Loss** / Class Weighting to address severe class imbalance.
+*   **Optimized Pipeline:**
+    *   **Hyperparameter Tuning:** Integrated Optuna tuning loop.
+    *   **Modular Design:** Separated concerns for loading, splitting, sampling, and training.
+    *   **Interactive Visualization:** Jupyter widgets for exploring raw signals, predictions, and model performance.
 
-Key features include:
--   **Multi-modal Data Support:** Handles signals from both chest (ECG, EDA, EMG, Temp, ACC) and wrist (BVP, EDA, Temp, ACC) devices.
--   **Advanced Models:**
-    -   **StressLSTM:** A baseline Long Short-Term Memory network with late fusion of static features.
-    -   **StressCNNLSTM:** A hybrid CNN-LSTM architecture with 1D Convolutional layers for feature extraction, LSTM for temporal sequencing, and an optional Attention mechanism. It uses early fusion for static features.
-    -   **StressTransformer:** A state-of-the-art Transformer Encoder model (like BERT) for capturing long-range dependencies in physiological signals.
--   **Comprehensive Pipeline:** Automated data loading, signal resampling, alignment, windowing, and feature extraction (including HRV and statistical features).
--   **Optimized Tuning:** High-performance hyperparameter tuning pipeline (using Optuna) that reuses data splits for 10x-50x faster execution.
--   **Configurable Experiments:** All aspects of the pipeline (datasets, features, model hyperparameters, training settings) are controlled via a central `config.json` file.
-
-## Project Structure
+## 📂 Project Structure
 
 ```text
 C:\Users\bhara\Downloads\Code\StressProject\
-├── Baseline_Calibration_for_Stress_Response.ipynb  # Main entry point for training and evaluation
-├── config.json                                     # Configuration file for the entire pipeline
-├── data_pipeline.py                                # Orchestrates data loading, windowing, and splitting
-├── models.py                                       # PyTorch model definitions (StressLSTM, StressCNNLSTM)
-├── preprocessing.py                                # Signal processing and feature extraction
-├── training.py                                     # Training loops and validation logic
-├── utils.py                                        # Utility functions
-├── outputs/                                        # Generated artifacts
-│   ├── models/                                     # Saved model weights (.pth)
-│   ├── processed_data/                             # Preprocessed datasets (.joblib)
-│   └── results/                                    # Evaluation metrics and plots
+├── run_pipeline.py                 # 🚀 MAIN ENTRY POINT: Runs the full end-to-end pipeline
+├── config.json                     # Central configuration for paths, models, and training
+├── requirements.txt                # Project dependencies
+│
+├── data_loader.py                  # Loads raw WESAD/NURSE data
+├── preprocessing.py                # Signal resampling, alignment, and feature extraction orchestration
+├── signal_processing.py            # Low-level signal resampling logic
+├── feature_extraction.py           # Computation of static features (HRV, EDA peaks, etc.)
+│
+├── data_pipeline.py                # Pipeline orchestration: windowing, splitting, sampling, dataloaders
+├── windowing.py                    # Splits signals into overlapping windows
+├── data_splitting.py               # Group-stratified train/val/test splitting
+├── sampling.py                     # Handles class imbalance (SMOTE, Random Oversampling)
+├── pytorch_datasets.py             # Custom PyTorch Dataset and DataLoader creation
+│
+├── models.py                       # PyTorch model definitions (LSTM, CNN-LSTM, Transformer)
+├── losses.py                       # Custom loss functions (FocalLoss)
+├── training.py                     # Training loops, validation, and early stopping
+├── evaluation.py                   # Metrics (F1, AUC), threshold optimization, and reporting
+├── tuning.py                       # Optuna hyperparameter optimization script
+│
+├── visualization.py                # Plotting utilities (Signal, ROC, Confusion Matrix)
+├── widget_setup.py                 # Interactive Jupyter widgets
+├── utils.py                        # Helpers for config, logging, and I/O
+│
+└── outputs/                        # Generated artifacts
+    ├── models/                     # Saved model weights (.pth)
+    ├── processed_data/             # Cached preprocessed data (.joblib)
+    └── results/                    # Evaluation metrics (.json) and plots (.png)
 ```
 
-## Installation
+## 🛠️ Installation
 
 1.  **Clone the repository:**
     ```bash
@@ -42,70 +63,69 @@ C:\Users\bhara\Downloads\Code\StressProject\
     ```
 
 2.  **Install Dependencies:**
-    Ensure you have Python installed. The key libraries required are:
-    -   `numpy`
-    -   `pandas`
-    -   `torch` (PyTorch)
-    -   `scikit-learn`
-    -   `neurokit2` (for physiological feature extraction)
-    -   `joblib`
-    -   `matplotlib` / `seaborn` (for visualization)
-
-    You can install them via pip:
+    It is recommended to use a virtual environment.
     ```bash
-    pip install numpy pandas torch scikit-learn neurokit2 joblib matplotlib seaborn
+    pip install -r requirements.txt
     ```
+    *Key libraries: `torch`, `numpy`, `pandas`, `neurokit2`, `scikit-learn`, `optuna`, `shap`, `joblib`.*
 
-## Configuration
+## ⚙️ Configuration
 
-The `config.json` file allows you to customize the experiment without changing code. Key sections include:
+The `config.json` file controls the entire pipeline. Key sections:
 
--   **`datasets`**: Paths and settings for WESAD and NURSE datasets.
--   **`features_to_use`**: Select which signals (e.g., "chest_ECG", "wrist_BVP") to include in the sequence input.
--   **`static_features_to_use`**: List of statistical features (e.g., HRV metrics, means, std devs) to calculate and use.
--   **`model_config`**: Choose the model type (`CNN-LSTM` or `LSTM`) and tune hyperparameters like layers, dropout, filters, and attention heads.
--   **`training_config`**: Set batch size, learning rate, epochs, and loss function.
+*   **`datasets`**: Paths to WESAD/NURSE data. **Update the `path` values to match your local system.**
+*   **`features_to_use`**: Define which sensor channels to use (e.g., `["ECG", "EDA"]`).
+*   **`static_features_to_use`**: List of computed features to include (HRV, statistical moments).
+*   **`windowing`**: Set `window_size_sec` (default 60s) and `window_overlap` (default 0.5).
+*   **`model_config`**: Select model `type` (`CNN-LSTM`, `TRANSFORMER`, `LSTM`) and architecture parameters.
+*   **`training_config`**: Hyperparameters (LR, Batch Size, Epochs) and `sampling_strategy` (`smote` or `random`).
 
-## Usage
+## 🚀 Usage
 
-1.  **Configure Data Paths:**
-    Open `config.json` and ensure the paths under `datasets` point to the actual locations of your WESAD or NURSE datasets on your machine.
+### 1. Run the Full Pipeline
+The easiest way to run the project is via the main script. This handles data loading, processing, training, and evaluation in one go.
 
-2.  **Run the Pipeline:**
-    The project is primarily driven by the Jupyter Notebook:
-    `Baseline_Calibration_for_Stress_Response.ipynb`
+```bash
+python run_pipeline.py
+```
+*Check the console output for detailed logs regarding data loading status, split sizes, and training progress.*
 
-    Open this notebook in Jupyter Lab or VS Code and execute the cells. It will:
-    -   Load configuration.
-    -   Process raw data (if not already cached).
-    -   Create training, validation, and test splits.
-    -   Initialize the selected model (e.g., StressCNNLSTM).
-    -   Train the model and save the best weights.
-    -   Evaluate performance and generate plots.
+### 2. Hyperparameter Tuning
+To optimize model performance using Optuna:
 
-## Models
+```bash
+python tuning.py
+```
+*This will run multiple trials to find the best hyperparameters (learning rate, layers, etc.) and save them to `outputs/results/best_hyperparameters.json`.*
 
-### StressCNNLSTM
-A hybrid model designed to capture both local patterns and long-term dependencies.
--   **CNN Encoder:** 1D Conv layers extract features from physiological signal windows.
--   **Early Fusion:** Static features (demographics, computed stats) are concatenated with CNN outputs.
--   **Bi-LSTM:** Processes the sequence of features to understand temporal dynamics.
--   **Attention (Optional):** Weighs the importance of different time steps before classification.
+### 3. Interactive Notebook
+For exploration and visualization, use the Jupyter Notebook:
+`Baseline_Calibration_for_Stress_Response.ipynb`
 
-### StressTransformer
-A modern architecture leveraging the Transformer Encoder mechanism.
--   **Transformer Encoder:** Uses self-attention mechanisms to weigh the influence of different parts of the signal sequence on each other, capturing complex long-range dependencies often missed by RNNs.
--   **Positional Encoding:** Injects temporal order information into the sequence.
--   **Global Pooling:** Aggregates the encoded sequence for classification.
--   **Flexible Fusion:** Supports both early and late fusion of static features.
+*   **Interactive Plots:** Visualize raw signals vs. resampled signals.
+*   **Prediction Analysis:** Overlay model predictions on true signal labels.
+*   **HRV Analysis:** Inspect ECG signals with detected R-peaks.
 
-### StressLSTM
-A simpler baseline model.
--   **LSTM:** Processes the time-series data.
--   **Late Fusion:** Static features are concatenated with the LSTM output just before the final classification layer.
+## 📊 Pipeline Stages
 
-## Outputs
+1.  **Data Loading:** Reads raw pickle/CSV files.
+2.  **Preprocessing:**
+    *   **Resampling:** Downsamples signals to a common target rate (e.g., 64Hz).
+    *   **Feature Extraction:** Calculates HRV metrics using original high-freq ECG data.
+3.  **Windowing:** Slices continuous signals into fixed-length windows (e.g., 60s).
+4.  **Splitting:** Performs **Subject-Group Stratified Split** to ensure no subject leakage between Train/Val/Test.
+5.  **Sampling:** Applies **SMOTE** or Random Oversampling to the Training set to balance stress/non-stress classes.
+6.  **Training:** Trains the PyTorch model with **Early Stopping** and **ReduceLROnPlateau**.
+7.  **Evaluation:** Computes Accuracy, F1-Score, Precision, Recall, and ROC-AUC on the Test set. Optimizes the decision threshold for maximum F1.
 
-After running the notebook, check the `outputs/` directory:
--   **`outputs/models/`**: Contains the saved `best_model.pth`.
--   **`outputs/results/`**: Contains evaluation metrics (`test_evaluation_results.json`) and visualization plots (confusion matrices, training history).
+## 📈 Outputs
+
+Artifacts are saved in the `outputs/` directory:
+*   `processed_aligned_data.joblib`: Cached processed signals.
+*   `static_features_results.joblib`: Cached feature dataframes.
+*   `best_model.pth`: State dictionary of the best trained model.
+*   `results/`: Contains:
+    *   `test_evaluation_results.json`: Full metrics report.
+    *   `confusion_matrix_test.png`: Visual confusion matrix.
+    *   `roc_curve_test.png`: ROC Curve.
+    *   `training_history.png`: Loss and F1 score curves.
