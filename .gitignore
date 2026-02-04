@@ -22,3 +22,6 @@ directories to save intermediate and final results/
 # IDEs
 .vscode/
 .idea/
+
+# Assistant Internal
+.claude/
