@@ -25,3 +25,6 @@ directories to save intermediate and final results/
 
 # Assistant Internal
 .claude/
+
+# Temporary / Scratch
+scratch/

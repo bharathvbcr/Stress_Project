@@ -7,6 +7,14 @@ import math
 
 from utils import safe_get
 
+# Optional TimesFM wrapper — imported lazily to avoid hard dependency
+try:
+    from timesfm_wrapper import TimesFMEmbeddingExtractor, TIMESFM_EMBED_DIM, is_available as timesfm_is_available
+    _TIMESFM_WRAPPER_OK = True
+except ImportError:
+    _TIMESFM_WRAPPER_OK = False
+    TIMESFM_EMBED_DIM = 1280  # fallback for 200M model
+
 log = logging.getLogger(__name__)
 
 # ==============================================================================
@@ -113,6 +121,7 @@ class StressCNNLSTM(nn.Module):
         current_channels = input_dim_sequence
         for i in range(len(cnn_filters)):
             cnn_layers.append(nn.Conv1d(current_channels, cnn_filters[i], cnn_kernels[i], stride=cnn_stride, padding=cnn_padding))
+            cnn_layers.append(nn.BatchNorm1d(cnn_filters[i])) # Added BatchNorm for stability
             if cnn_activation_str == 'relu': cnn_layers.append(nn.ReLU())
             elif cnn_activation_str == 'tanh': cnn_layers.append(nn.Tanh())
             cnn_layers.append(nn.Dropout(dropout))
@@ -282,18 +291,222 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 # ==============================================================================
+# == StressTimesFM Model (Foundation Model) ==
+# ==============================================================================
+class StressTimesFM(nn.Module):
+    """
+    Stress classifier built on top of the TimesFM 2.5 foundation model.
+
+    Strategy
+    --------
+    TimesFM is a **univariate** forecasting model.  We process each
+    physiological channel independently through the shared TimesFM backbone,
+    capture the encoder's hidden representations (via forward hooks in
+    TimesFMEmbeddingExtractor), then:
+
+      1. Mean-pool the per-channel embeddings  →  (N, embed_dim)
+      2. Optionally concatenate static features  →  (N, embed_dim + F_static)
+      3. Apply an MLP classification head        →  (N, 1)
+
+    Two-phase training
+    ------------------
+    Phase 1 (backbone frozen)  : Train only the MLP head (fast, low VRAM).
+    Phase 2 (partial unfreeze) : Fine-tune the last N transformer blocks
+                                  of the backbone at a very low LR.
+
+    Call freeze_backbone() / unfreeze_backbone() to switch phases.
+
+    Parameters
+    ----------
+    input_dim_sequence : int
+        Number of physiological channels (e.g., 8 for ECG+EDA+BVP+…).
+    input_dim_static : int
+        Number of hand-crafted static features (HRV, EDA peaks, etc.).
+    model_config : dict
+        From config.json → model_config section.
+    output_dim : int
+        1 for binary classification.
+    device : torch.device
+        The device to place the backbone on.
+    """
+
+    def __init__(
+        self,
+        input_dim_sequence: int,
+        input_dim_static: int,
+        model_config: Dict[str, Any],
+        output_dim: int = 1,
+        device: Optional[torch.device] = None,
+    ) -> None:
+        super().__init__()
+
+        if not _TIMESFM_WRAPPER_OK:
+            raise ImportError(
+                "timesfm_wrapper could not be imported. "
+                "Install TimesFM from source for Python 3.14 support: "
+                "pip install \"timesfm[torch] @ git+https://github.com/google-research/timesfm.git\""
+            )
+
+        # --- Config ---
+        checkpoint = safe_get(model_config, ['timesfm_checkpoint'], 'google/timesfm-2.5-200m-pytorch')
+        context_len = safe_get(model_config, ['timesfm_context_len'], 1024)
+        horizon = safe_get(model_config, ['timesfm_horizon'], 128)
+        normalize_inputs = safe_get(model_config, ['timesfm_normalize_inputs'], True)
+        head_hidden_dim = safe_get(model_config, ['timesfm_head_hidden_dim'], 128)
+        dropout = safe_get(model_config, ['dropout'], 0.2)
+        freeze = safe_get(model_config, ['timesfm_freeze_backbone'], True)
+
+        self.input_dim_sequence = input_dim_sequence
+        self.input_dim_static = input_dim_static
+        self.output_dim = output_dim
+        self._freeze_backbone_on_init = freeze
+        self._is_attached = False # Performance flag for forward pass hot-path
+
+        _device = device if device is not None else torch.device('cpu')
+
+        # --- TimesFM Embedding Extractor (per-channel backbone) ---
+        self.extractor = TimesFMEmbeddingExtractor(
+            checkpoint=checkpoint,
+            context_len=context_len,
+            horizon=horizon,
+            normalize_inputs=normalize_inputs,
+            device=_device,
+        )
+        self.embed_dim = self.extractor.embed_dim  # typically 512
+
+        # --- Classification Head ---
+        # In: embed_dim (pooled over channels) + static features
+        fc_in = self.embed_dim + input_dim_static
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(fc_in),
+            nn.Linear(fc_in, head_hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(head_hidden_dim, head_hidden_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(head_hidden_dim // 2, output_dim),
+        )
+
+        log.info(
+            f"StressTimesFM initialised — checkpoint='{checkpoint}', "
+            f"context_len={context_len}, embed_dim={self.embed_dim}, "
+            f"channels={input_dim_sequence}, static={input_dim_static}, "
+            f"freeze_backbone={freeze}"
+        )
+
+    # ------------------------------------------------------------------
+    def _ensure_attached(self) -> None:
+        """Lazy-attach backbone and apply initial freeze policy."""
+        if not self._is_attached:
+            if self.extractor._backbone is None:
+                self.extractor._attach()
+                if self._freeze_backbone_on_init:
+                    self.extractor.freeze_backbone()
+            self._is_attached = True
+
+    # ------------------------------------------------------------------
+    def freeze_backbone(self) -> None:
+        """Freeze TimesFM backbone for Phase-1 training."""
+        self._ensure_attached()
+        self.extractor.freeze_backbone()
+
+    def unfreeze_backbone(self, last_n_blocks: int = 4) -> None:
+        """Partially unfreeze backbone for Phase-2 fine-tuning."""
+        self._ensure_attached()
+        self.extractor.unfreeze_backbone(last_n_blocks=last_n_blocks)
+
+    # ------------------------------------------------------------------
+    def forward(
+        self,
+        x_sequence: torch.Tensor,
+        x_static: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        x_sequence : torch.Tensor, shape (N, T, F_channels)
+            Multi-channel physiological windows.
+        x_static : torch.Tensor | None, shape (N, F_static)
+            Hand-crafted features; zeros used if None.
+
+        Returns
+        -------
+        logits : torch.Tensor, shape (N, 1)
+        """
+        self._ensure_attached()
+
+        N, T, F = x_sequence.shape
+        device = x_sequence.device
+
+        # ----- Per-channel embedding extraction -----
+        # Reshape: (N, T, F) → (N*F, T)  — each channel is an independent series
+        x_flat = x_sequence.permute(0, 2, 1).reshape(N * F, T)  # (N*F, T)
+        channel_embeds = self.extractor(x_flat)                  # (N*F, embed_dim)
+        # Reshape back: (N, F, embed_dim)  then mean-pool across channels
+        channel_embeds = channel_embeds.view(N, F, self.embed_dim)
+        pooled_embed = channel_embeds.mean(dim=1)                # (N, embed_dim)
+
+        # ----- Fuse with static features -----
+        if self.input_dim_static > 0:
+            if x_static is None:
+                x_static = torch.zeros(N, self.input_dim_static, device=device)
+            if x_static.ndim == 1:
+                x_static = x_static.unsqueeze(0).expand(N, -1)
+            fused = torch.cat([pooled_embed, x_static], dim=1)  # (N, embed+static)
+        else:
+            fused = pooled_embed                                  # (N, embed_dim)
+
+        # ----- Classification head -----
+        logits = self.classifier(fused)  # (N, output_dim)
+        return logits
+
+# ==============================================================================
 # == Model Factory Function ==
 # ==============================================================================
 def get_model(config: Dict[str, Any], input_dim_sequence: int, input_dim_static: int) -> nn.Module:
     """
     Instantiates the appropriate model based on the configuration.
+
+    Supported types (config.json → model_config.type):
+      - ``LSTM``       : StressLSTM      (baseline, late fusion)
+      - ``CNN-LSTM``   : StressCNNLSTM   (CNN + Bi-LSTM + Attention)
+      - ``TRANSFORMER``: StressTransformer
+      - ``TIMESFM``    : StressTimesFM   (TimesFM 2.5 foundation model)
     """
     model_type = safe_get(config, ['model_config', 'type'], 'LSTM').upper()
     model_config = safe_get(config, ['model_config'], {})
-    output_dim = 1 
+    output_dim = 1
 
     log.info(f"Attempting to build model of type: {model_type}")
 
+    # ---- TimesFM ----
+    if model_type == 'TIMESFM':
+        if not _TIMESFM_WRAPPER_OK or not timesfm_is_available():
+            log.error(
+                "TimesFM model requested but the 'timesfm' package is not available. "
+                "Install from source: pip install \"timesfm[torch] @ git+https://github.com/google-research/timesfm.git\""
+            )
+            model_type = 'CNN-LSTM'
+        else:
+            try:
+                import torch
+                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                model = StressTimesFM(
+                    input_dim_sequence=input_dim_sequence,
+                    input_dim_static=input_dim_static,
+                    model_config=model_config,
+                    output_dim=output_dim,
+                    device=device,
+                )
+                log.info("StressTimesFM model built successfully.")
+                return model
+            except Exception as e:
+                log.error(f"Failed to build StressTimesFM: {e}", exc_info=True)
+                log.error("Falling back to CNN-LSTM.")
+                model_type = 'CNN-LSTM'
+
+    # ---- CNN-LSTM ----
     if model_type == 'CNN-LSTM':
         try:
             model = StressCNNLSTM(input_dim_sequence, input_dim_static, model_config, output_dim)
@@ -304,6 +517,7 @@ def get_model(config: Dict[str, Any], input_dim_sequence: int, input_dim_static:
             log.error("Falling back to LSTM.")
             model_type = 'LSTM'
 
+    # ---- Transformer ----
     if model_type == 'TRANSFORMER':
         try:
             model = StressTransformer(input_dim_sequence, input_dim_static, model_config, output_dim)
@@ -314,19 +528,19 @@ def get_model(config: Dict[str, Any], input_dim_sequence: int, input_dim_static:
             log.error("Falling back to LSTM.")
             model_type = 'LSTM'
 
-    # Default/Fallback
+    # ---- Default / Fallback: LSTM ----
     if model_type == 'LSTM':
-         try:
-             lstm_config = {
-                 'lstm_layers': safe_get(model_config, ['lstm_layers'], [64]),
-                 'dropout': safe_get(model_config, ['dropout'], 0.0),
-                 'bidirectional': safe_get(model_config, ['bidirectional'], False)
-             }
-             model = StressLSTM(input_dim_sequence, input_dim_static, lstm_config, output_dim)
-             log.info("StressLSTM model built successfully.")
-             return model
-         except Exception as e:
-             log.critical(f"Failed to build StressLSTM: {e}", exc_info=True)
-             raise
+        try:
+            lstm_config = {
+                'lstm_layers': safe_get(model_config, ['lstm_layers'], [64]),
+                'dropout': safe_get(model_config, ['dropout'], 0.0),
+                'bidirectional': safe_get(model_config, ['bidirectional'], False),
+            }
+            model = StressLSTM(input_dim_sequence, input_dim_static, lstm_config, output_dim)
+            log.info("StressLSTM model built successfully.")
+            return model
+        except Exception as e:
+            log.critical(f"Failed to build StressLSTM: {e}", exc_info=True)
+            raise
 
     raise ValueError(f"Unknown model type specified in config: '{model_type}'")

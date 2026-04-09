@@ -60,28 +60,25 @@ class SequenceWindowDataset(Dataset):
 
         # --- Process Sequence Features ---
         try:
-            # Determine dimensions from the first window
+            # Optimized vectorized shape validation
             first_seq_shape = sequence_features[0].shape
-            if len(first_seq_shape) != 2:
-                 raise ValueError(f"Sequence features must be 2D (window_length, num_features). Got shape {first_seq_shape} for first element.")
             self.window_length = first_seq_shape[0]
             self.num_sequence_features = first_seq_shape[1]
+            
+            # Use NumPy to check shape consistency across all windows at once
+            all_shapes = np.array([s.shape for s in sequence_features])
+            if not np.all(all_shapes[:, 0] == self.window_length):
+                raise ValueError("Inconsistent window lengths detected in sequence features.")
+            if not np.all(all_shapes[:, 1] == self.num_sequence_features):
+                raise ValueError("Inconsistent feature dimensions detected in sequence features.")
+            
+            processed_seq_features = sequence_features
 
-            processed_seq_features = []
-            # Validate shape consistency across all sequence windows
-            for i, seq_win in enumerate(sequence_features):
-                 if not isinstance(seq_win, np.ndarray) or seq_win.ndim != 2:
-                     raise ValueError(f"Sequence window at index {i} is not a 2D numpy array (shape: {seq_win.shape if hasattr(seq_win, 'shape') else type(seq_win)}).")
-                 if seq_win.shape[0] != self.window_length:
-                     raise ValueError(f"Inconsistent sequence window length at index {i}. Expected {self.window_length}, got {seq_win.shape[0]}.")
-                 if seq_win.shape[1] != self.num_sequence_features:
-                     raise ValueError(f"Inconsistent sequence feature dimension at index {i}. Expected {self.num_sequence_features}, got {seq_win.shape[1]}.")
-                 processed_seq_features.append(seq_win)
-
-            # Stack validated sequence windows into a single tensor
-            self.sequence_features = torch.tensor(np.stack(processed_seq_features, axis=0), dtype=torch.float32)
+            # Stack validated sequence windows into a single numpy array (viewable by torch)
+            # This is significantly more memory-efficient than converting to tensor immediately
+            self.sequence_features_np = np.stack(processed_seq_features, axis=0)
             del processed_seq_features # Free memory immediately
-            log.info(f"Stacked {len(sequence_features)} sequence feature windows.")
+            log.info(f"Stacked {len(sequence_features)} sequence feature windows in RAM.")
         except Exception as e:
             log.error(f"Error processing or stacking sequence features: {e}", exc_info=True)
             raise
@@ -138,22 +135,21 @@ class SequenceWindowDataset(Dataset):
         # --- Stack Static Features ---
         try:
             if self.num_static_features > 0 and processed_static_features:
-                 # Stack the processed (potentially padded) static vectors
-                 self.static_features = torch.tensor(np.stack(processed_static_features, axis=0), dtype=torch.float32)
+                 # Stack into numpy array first
+                 self.static_features_np = np.stack(processed_static_features, axis=0)
             else:
-                 # Handle case where num_static_features is 0 or list is empty/contains only empty arrays
-                 # Create an empty tensor with shape (N, 0)
-                 self.static_features = torch.empty((len(sequence_features), 0), dtype=torch.float32)
-            log.info(f"Stacked {len(processed_static_features)} static feature vectors (Dim: {self.num_static_features}).")
+                 # Create an empty numpy array with shape (N, 0)
+                 self.static_features_np = np.zeros((len(sequence_features), 0), dtype=np.float32)
+            log.info(f"Stacked {len(processed_static_features)} static feature vectors in RAM (Dim: {self.num_static_features}).")
         except Exception as e:
             log.error(f"Error stacking static features: {e}", exc_info=True)
             raise
 
         # --- Process Labels ---
         try:
-            self.labels = torch.tensor(labels, dtype=torch.float32) # Use float for BCEWithLogitsLoss
+            self.labels_np = np.array(labels, dtype=np.float32) # Use float for BCEWithLogitsLoss
         except Exception as e:
-            log.error(f"Error converting labels to tensor: {e}", exc_info=True)
+            log.error(f"Error converting labels to array: {e}", exc_info=True)
             raise
 
         # --- Store Metadata ---
@@ -171,45 +167,35 @@ class SequenceWindowDataset(Dataset):
              self.subject_ids_tensor = torch.zeros(len(subject_ids), dtype=torch.int64)
 
         try:
-            self.window_start_indices = torch.tensor(window_start_indices, dtype=torch.int64)
+            self.window_start_indices_np = np.array(window_start_indices, dtype=np.int64)
         except Exception as e:
-            log.error(f"Error converting window start indices to tensor: {e}", exc_info=True)
+            log.error(f"Error converting window start indices: {e}", exc_info=True)
             raise
 
         # --- Log Final Shapes ---
-        log.info(f"Created SequenceWindowDataset with {len(self.labels)} windows.")
-        log.info(f"  Sequence Feature tensor shape: {self.sequence_features.shape}")
-        log.info(f"  Static Feature tensor shape: {self.static_features.shape}")
-        log.info(f"  Label tensor shape: {self.labels.shape}")
+        log.info(f"Created SequenceWindowDataset with {len(self.labels_np)} windows.")
+        log.info(f"  Sequence Feature shape: {self.sequence_features_np.shape}")
+        log.info(f"  Static Feature shape: {self.static_features_np.shape}")
+        log.info(f"  Label shape: {self.labels_np.shape}")
         # Log tensor shape, noting it might be a placeholder if IDs were strings
-        log.info(f"  Subject ID tensor shape: {self.subject_ids_tensor.shape} {'(Placeholder if IDs are strings)' if not all(isinstance(x, int) for x in subject_ids) else ''}")
-        log.info(f"  Window Start tensor shape: {self.window_start_indices.shape}")
+        log.info(f"  Subject ID shape: {len(self.subject_ids_list)}")
+        log.info(f"  Window Start shape: {self.window_start_indices_np.shape}")
 
     def __len__(self) -> int:
         """Returns the total number of windows in the dataset."""
-        return len(self.labels)
+        return len(self.labels_np)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Returns a single window's data.
-
-        Args:
-            idx (int): The index of the window to retrieve.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-                - Sequence features tensor (window_length, num_sequence_features)
-                - Static features tensor (num_static_features,) or (0,) if none
-                - Label tensor (scalar)
-                - Subject ID tensor (scalar, potentially placeholder)
-                - Window start index tensor (scalar)
+        Returns a single window's data as Tensors.
+        Converts from numpy to Tensor only at the last moment to save RAM.
         """
         return (
-            self.sequence_features[idx],
-            self.static_features[idx], # Will have shape (0,) if no static features
-            self.labels[idx],
-            self.subject_ids_tensor[idx], # Return the tensor version
-            self.window_start_indices[idx]
+            torch.from_numpy(self.sequence_features_np[idx]),
+            torch.from_numpy(self.static_features_np[idx]),
+            torch.tensor(self.labels_np[idx], dtype=torch.float32),
+            self.subject_ids_tensor[idx],
+            torch.tensor(self.window_start_indices_np[idx], dtype=torch.int64)
         )
 
 # ==============================================================================
@@ -313,7 +299,8 @@ def create_pytorch_dataloaders(
                      num_workers=num_workers,
                      drop_last=True, # Drop last incomplete batch during training
                      pin_memory=pin_memory,
-                     persistent_workers=persist_workers # Only True if num_workers > 0
+                     persistent_workers=persist_workers, # Only True if num_workers > 0
+                     prefetch_factor=2 if num_workers > 0 else None
                  )
                  # Handle edge case where drop_last=True makes loader empty
                  if len(train_loader) == 0 and len(train_dataset) > 0:

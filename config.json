@@ -112,39 +112,54 @@
     },
 
     "model_config": {
-        "type": "CNN-LSTM", 
-        "comment_cnn": "Parameters specific to the CNN part (if type is CNN-LSTM)",
-        "cnn_filters": [32, 64], 
+        "type": "TIMESFM",
+        "comment_type": "Options: CNN-LSTM | TRANSFORMER | LSTM | TIMESFM",
+
+        "comment_timesfm": "--- TimesFM 2.5 Foundation Model settings (used when type=TIMESFM) ---",
+        "timesfm_checkpoint": "google/timesfm-2.5-200m-pytorch",
+        "timesfm_context_len": 1024,
+        "timesfm_horizon": 128,
+        "timesfm_normalize_inputs": true,
+        "timesfm_freeze_backbone": true,
+        "comment_freeze": "Phase-1: freeze=true (train head only). Phase-2: set false to fine-tune.",
+        "timesfm_head_hidden_dim": 128,
+        "timesfm_finetune_last_n_blocks": 4,
+        "comment_finetune_blocks": "Number of TimesFM transformer blocks to unfreeze during Phase-2.",
+
+        "comment_cnn": "--- CNN-LSTM settings (used when type=CNN-LSTM) ---",
+        "cnn_filters": [32, 64],
         "cnn_kernels": [7, 5],
-        "cnn_stride": 1, 
-        "cnn_padding": "same", 
-        "cnn_activation": "relu", 
-        "comment_lstm": "Parameters specific to the LSTM part",
+        "cnn_stride": 1,
+        "cnn_padding": "same",
+        "cnn_activation": "relu",
+        "comment_lstm": "--- LSTM settings (used by CNN-LSTM and LSTM types) ---",
         "lstm_layers": [32],
-        "bidirectional": true, 
-        "attn_heads": 4, 
-        "dropout": 0.3 
+        "bidirectional": true,
+        "attn_heads": 4,
+        "dropout": 0.2
     },
 
     "training_config": {
         "epochs": 50, 
         "batch_size": 64, 
         "learning_rate": 0.0001, 
-        "optimizer": "adam",
+        "optimizer": "lion",
         "momentum": 0.9,
         "loss_function": "bce", 
         "focal_loss_alpha": 0.5, 
         "focal_loss_gamma": 2.0, 
         "sampling_strategy": "smote",
+        "mixed_precision": true,
+        "accumulation_steps": 4,
         "lr_scheduler": {
             "enabled": true,
-            "factor": 0.5,
-            "patience": 3
+            "type": "onecycle",
+            "max_lr": 0.001
         }
     },
 
     "tuning_config": {
-      "study_name": "stress_detection_study", 
+      "study_name": "physiopulse_study", 
       "epochs": 30, 
       "patience": 5 
     },

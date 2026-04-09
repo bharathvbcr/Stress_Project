@@ -1,18 +1,79 @@
-# training.py (Handles model training loop, validation, and early stopping)
+# training.py — Lightning-based training loop for stress-detection models
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import logging
-import time
 import os
 from typing import Dict, Any, Optional, Tuple
-from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
 import collections
 
+import lightning as L
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.loggers import CSVLogger
+
 from losses import FocalLoss
 from utils import safe_get
+
+# Global GPU precision hint — enables TF32 on Ampere+ GPUs (free perf, negligible accuracy loss)
+torch.set_float32_matmul_precision("high")
+
+# ==============================================================================
+# == SOTA Optimizers (LION) ==
+# ==============================================================================
+
+class Lion(optim.Optimizer):
+    """
+    Lion: EvolVed Sign Momentum.
+    Google Research implementation (sign-based momentum).
+    Significantly more memory efficient than AdamW and often faster.
+    Ref: https://arxiv.org/abs/2302.06675
+    """
+    def __init__(self, params, lr=1e-4, betas=(0.9, 0.99), weight_decay=0.0):
+        if not 0.0 <= lr:
+            raise ValueError(f"Invalid learning rate: {lr}")
+        if not 0.0 <= betas[0] < 1.0:
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
+        if not 0.0 <= betas[1] < 1.0:
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
+        defaults = dict(lr=lr, betas=betas, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                grad  = p.grad
+                state = self.state[p]
+
+                # State initialisation
+                if len(state) == 0:
+                    state['exp_avg'] = torch.zeros_like(p)
+
+                exp_avg      = state['exp_avg']
+                beta1, beta2 = group['betas']
+
+                # Weight decay
+                if group['weight_decay'] != 0:
+                    p.add_(p, alpha=-group['lr'] * group['weight_decay'])
+
+                # Update via sign of interpolated momentum
+                update = exp_avg * beta1 + grad * (1 - beta1)
+                p.add_(torch.sign(update), alpha=-group['lr'])
+
+                # Update momentum
+                exp_avg.mul_(beta2).add_(grad, alpha=1 - beta2)
+
+        return loss
+
 
 log = logging.getLogger(__name__)
 
@@ -37,32 +98,30 @@ def _calculate_pos_weight(train_loader: DataLoader, device: torch.device) -> Opt
     """
     log.info("Calculating class weights for training set (for potential BCE use)...")
     train_label_counts = collections.Counter()
-    num_train_samples = 0
-    pos_weight = None
+    num_train_samples  = 0
+    pos_weight         = None
 
     if not train_loader:
         log.error("Train loader is None, cannot calculate weights.")
         return None
 
     try:
-        # Optimization: Try to access labels directly from the dataset
-        if hasattr(train_loader.dataset, 'labels'):
+        # Optimisation: access labels directly from the dataset when possible
+        if hasattr(train_loader.dataset, 'labels_np'):
             log.info("Accessing labels directly from train_loader.dataset (Optimized)...")
-            # Assuming labels is a tensor or numpy array
-            labels_tensor = train_loader.dataset.labels
-            labels_np = labels_tensor.cpu().numpy().astype(int)
+            labels_np          = train_loader.dataset.labels_np.astype(int)
             train_label_counts = collections.Counter(labels_np)
-            num_train_samples = len(labels_np)
+            num_train_samples  = len(labels_np)
         else:
             log.info("Dataset labels not directly accessible. Iterating loader (Slower)...")
-            # Fallback: Iterate through the training loader to count labels
             for batch_data in train_loader:
-                # Expecting (seq, static, labels, subj_id, start_idx) from SequenceWindowDataset
                 if len(batch_data) != 5:
-                     log.warning("Train loader batch did not contain 5 items. Skipping weight calculation for this batch.")
-                     continue
-                _, _, labels, _, _ = batch_data # Unpack labels
-                # Ensure labels are on CPU and converted to numpy for Counter
+                    log.warning(
+                        "Train loader batch did not contain 5 items. "
+                        "Skipping weight calculation for this batch."
+                    )
+                    continue
+                _, _, labels, _, _ = batch_data
                 batch_counts = collections.Counter(labels.cpu().numpy().astype(int))
                 train_label_counts.update(batch_counts)
                 num_train_samples += len(labels)
@@ -71,24 +130,23 @@ def _calculate_pos_weight(train_loader: DataLoader, device: torch.device) -> Opt
             log.error("Train loader has 0 samples. Cannot calculate weights.")
             return None
 
-        # Calculate counts for class 0 (negative) and class 1 (positive)
         count_0 = train_label_counts.get(0, 0)
         count_1 = train_label_counts.get(1, 0)
-        log.info(f"Training label counts - 0: {count_0}, 1: {count_1}")
+        log.info(f"Training label counts — 0: {count_0}, 1: {count_1}")
 
-        # Calculate weight only if both classes are present
         if count_0 > 0 and count_1 > 0:
-             # Weight for positive class = (number of negatives) / (number of positives)
-             weight_for_1 = count_0 / count_1
-             # Create a tensor on the specified device
-             pos_weight = torch.tensor([weight_for_1], device=device, dtype=torch.float32)
-             log.info(f"Calculated pos_weight for BCE: {pos_weight.item():.4f}")
+            weight_for_1 = count_0 / count_1
+            pos_weight   = torch.tensor([weight_for_1], device=device, dtype=torch.float32)
+            log.info(f"Calculated pos_weight for BCE: {pos_weight.item():.4f}")
         else:
-             log.warning("Training data has only 1 class present or one class has zero samples. Weighting disabled for BCE.")
+            log.warning(
+                "Training data has only 1 class present or one class has zero samples. "
+                "Weighting disabled for BCE."
+            )
 
     except Exception as e:
         log.error(f"Error calculating weights: {e}. Weighting disabled for BCE.", exc_info=True)
-        pos_weight = None # Ensure None on error
+        pos_weight = None
 
     return pos_weight
 
@@ -108,281 +166,123 @@ def _get_criterion(config: Dict[str, Any], pos_weight: Optional[torch.Tensor]) -
     Raises:
         ImportError: If FocalLoss is selected but the class is not available.
     """
-    # Get loss function type from config, default to 'bce'
     loss_function_type = safe_get(config, ['training_config', 'loss_function'], 'bce').lower()
-    criterion = None
+    criterion          = None
 
     # --- Focal Loss ---
     if loss_function_type == 'focal':
         try:
-            # Get alpha and gamma parameters from config
-            alpha = safe_get(config, ['training_config', 'focal_loss_alpha'], 0.25)
-            gamma = safe_get(config, ['training_config', 'focal_loss_gamma'], 2.0)
-            # Initialize FocalLoss (ensure FocalLoss class is imported)
+            alpha     = safe_get(config, ['training_config', 'focal_loss_alpha'], 0.25)
+            gamma     = safe_get(config, ['training_config', 'focal_loss_gamma'], 2.0)
             criterion = FocalLoss(alpha=alpha, gamma=gamma, reduction='mean')
             log.info(f"Using FocalLoss (alpha={alpha}, gamma={gamma})")
         except NameError:
-             # This happens if FocalLoss class wasn't imported successfully
-             log.critical("FocalLoss selected but class definition not found! Aborting.")
-             raise ImportError("FocalLoss class not found.")
+            log.critical("FocalLoss selected but class definition not found! Aborting.")
+            raise ImportError("FocalLoss class not found.")
         except Exception as e:
-             log.error(f"Error initializing FocalLoss: {e}. Falling back to BCE.")
-             loss_function_type = 'bce' # Fallback to BCE
+            log.error(f"Error initializing FocalLoss: {e}. Falling back to BCE.")
+            loss_function_type = 'bce'
 
-    # --- BCEWithLogitsLoss (Default or Fallback) ---
-    # Use BCE if 'bce' is specified or if FocalLoss initialization failed
-    if criterion is None: # Checks if criterion is still None
-         if pos_weight is not None:
-              # Use weighted BCE if pos_weight was calculated successfully
-              criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-              log.info(f"Using BCEWithLogitsLoss with pos_weight={pos_weight.item():.4f}")
-         else:
-              # Use standard unweighted BCE
-              criterion = nn.BCEWithLogitsLoss()
-              log.info("Using standard BCEWithLogitsLoss (no weighting).")
+    # --- BCEWithLogitsLoss (default or fallback) ---
+    if criterion is None:
+        if pos_weight is not None:
+            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            log.info(f"Using BCEWithLogitsLoss with pos_weight={pos_weight.item():.4f}")
+        else:
+            criterion = nn.BCEWithLogitsLoss()
+            log.info("Using standard BCEWithLogitsLoss (no weighting).")
 
     return criterion
 
 
-def _get_optimizer(model: nn.Module, config: Dict[str, Any]) -> optim.Optimizer:
+def _get_optimizer(model: nn.Module, config: Dict[str, Any], device: torch.device) -> optim.Optimizer:
     """
     Initializes the optimizer based on configuration.
+    Only optimizes parameters with requires_grad=True, making it compatible
+    with frozen-backbone models such as StressTimesFM in Phase-1 training.
 
     Args:
         model: The model parameters to optimize.
         config: Configuration dictionary.
+        device: The current device (used for fused kernel availability check).
 
     Returns:
         optim.Optimizer: The initialized optimizer.
     """
-    lr = safe_get(config, ['training_config', 'learning_rate'], 0.001)
+    lr             = safe_get(config, ['training_config', 'learning_rate'], 0.001)
     optimizer_type = safe_get(config, ['training_config', 'optimizer'], 'adam').lower()
 
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    n_trainable      = sum(p.numel() for p in trainable_params)
+    n_total          = sum(p.numel() for p in model.parameters())
+    log.info(
+        f"Optimizer will train {n_trainable:,} / {n_total:,} parameters "
+        f"({100 * n_trainable / max(n_total, 1):.1f}% trainable)."
+    )
+
+    if not trainable_params:
+        log.error(
+            "No trainable parameters found! All parameters are frozen. "
+            "The optimizer will be created but no weights will be updated."
+        )
+        trainable_params = list(model.parameters())[:1]
+
     if optimizer_type == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=lr)
-        log.info(f"Using Adam optimizer (LR={lr})")
+        is_cuda   = device.type == 'cuda'
+        optimizer = optim.Adam(trainable_params, lr=lr, fused=is_cuda)
+        log.info(f"Using Adam optimizer (LR={lr}, Fused={is_cuda})")
     elif optimizer_type == 'adamw':
         weight_decay = safe_get(config, ['training_config', 'weight_decay'], 0.01)
-        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-        log.info(f"Using AdamW optimizer (LR={lr}, Weight Decay={weight_decay})")
+        is_cuda      = device.type == 'cuda'
+        optimizer    = optim.AdamW(
+            trainable_params, lr=lr, weight_decay=weight_decay, fused=is_cuda
+        )
+        log.info(f"Using AdamW optimizer (LR={lr}, Weight Decay={weight_decay}, Fused={is_cuda})")
+    elif optimizer_type == 'lion':
+        weight_decay = safe_get(config, ['training_config', 'weight_decay'], 0.01)
+        optimizer    = Lion(trainable_params, lr=lr, weight_decay=weight_decay)
+        log.info(f"Using LION optimizer (Sign-Based Momentum, LR={lr}, WD={weight_decay})")
     elif optimizer_type == 'sgd':
-        momentum = safe_get(config, ['training_config', 'momentum'], 0.9)
-        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+        momentum  = safe_get(config, ['training_config', 'momentum'], 0.9)
+        optimizer = optim.SGD(trainable_params, lr=lr, momentum=momentum)
         log.info(f"Using SGD optimizer (LR={lr}, Momentum={momentum})")
     else:
         log.warning(f"Unknown optimizer type '{optimizer_type}'. Defaulting to Adam.")
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        optimizer = optim.Adam(trainable_params, lr=lr)
 
     return optimizer
 
 
-def _train_one_epoch(
-    model: nn.Module,
-    dataloader: DataLoader,
-    criterion: nn.Module,
-    optimizer: optim.Optimizer,
-    device: torch.device,
-    epoch_num: int, # Current epoch number (0-based)
-    total_epochs: int # Total number of epochs
-) -> float:
-    """
-    Runs a single training epoch, calculating loss and updating model weights.
+# ==============================================================================
+# == History Callback ==
+# ==============================================================================
 
-    Args:
-        model (nn.Module): The model to train.
-        dataloader (DataLoader): DataLoader for the training set.
-        criterion (nn.Module): The loss function.
-        optimizer (optim.Optimizer): The optimizer.
-        device (torch.device): The device to run training on (CPU or CUDA).
-        epoch_num (int): The current epoch number (for logging).
-        total_epochs (int): The total number of epochs (for logging).
+class _HistoryCallback(L.Callback):
+    """Accumulates per-epoch metrics into a history dict compatible with the legacy API."""
 
-    Returns:
-        float: The average training loss for the epoch. Returns np.nan if epoch fails.
-    """
-    model.train() # Set model to training mode
-    running_loss = 0.0
-    num_samples_processed = 0
-    total_batches = 0
-    failed_batches = 0
+    def __init__(self):
+        self.history = {
+            "train_loss":    [],
+            "val_loss":      [],
+            "val_accuracy":  [],
+            "val_f1":        [],
+        }
 
-    # Iterate over batches in the training dataloader
-    for i, batch_data in enumerate(dataloader):
-        # Basic check for expected data format
-        if len(batch_data) != 5:
-            log.warning(f"Epoch [{epoch_num+1}/{total_epochs}] Batch {i}: Skipping, incorrect data format from loader.")
-            continue
+    def _scalar(self, v):
+        if v is None:
+            return float("nan")
+        return v.item() if hasattr(v, "item") else float(v)
 
-        # Unpack data and move to the target device
-        seq_features, static_features, labels, _, _ = batch_data
-        seq_features = seq_features.to(device)
-        # Only move static features if the model uses them (input_dim_static > 0)
-        static_features = static_features.to(device) if hasattr(model, 'input_dim_static') and model.input_dim_static > 0 else None
-        labels = labels.to(device)
+    def on_train_epoch_end(self, trainer, pl_module):
+        m = trainer.callback_metrics
+        self.history["train_loss"].append(self._scalar(m.get("train_loss")))
 
-        batch_size = seq_features.size(0)
-        if batch_size == 0: continue # Skip empty batches
-        total_batches += 1
+    def on_validation_epoch_end(self, trainer, pl_module):
+        m = trainer.callback_metrics
+        self.history["val_loss"].append(self._scalar(m.get("val_loss")))
+        self.history["val_accuracy"].append(self._scalar(m.get("val_acc")))
+        self.history["val_f1"].append(self._scalar(m.get("val_f1")))
 
-        # --- Forward and Backward Pass ---
-        optimizer.zero_grad() # Reset gradients
-
-        # Forward pass: Get model predictions (logits)
-        try:
-            outputs = model(seq_features, static_features) # Pass both sequence and static features
-        except Exception as model_e:
-            log.error(f"Epoch [{epoch_num+1}/{total_epochs}] Batch {i}: Model forward pass error: {model_e}", exc_info=True)
-            log.error(f"  Input Shapes - Seq: {seq_features.shape}, Static: {static_features.shape if static_features is not None else 'None'}")
-            failed_batches += 1
-            continue # Skip this batch if model fails
-
-        # Loss calculation
-        try:
-            # Squeeze model output if necessary (e.g., if output is [N, 1])
-            # Ensure labels are float type for BCEWithLogitsLoss
-            loss = criterion(outputs.squeeze(), labels.float())
-        except Exception as loss_e:
-             log.error(f"Epoch [{epoch_num+1}/{total_epochs}] Batch {i}: Loss calculation error: {loss_e}", exc_info=True)
-             log.error(f"  Output shape: {outputs.shape}, Label shape: {labels.shape}, Label dtype: {labels.dtype}")
-             failed_batches += 1
-             continue # Skip this batch if loss calculation fails
-
-        # Backward pass: Calculate gradients
-        try:
-            loss.backward()
-        except Exception as backward_e:
-            log.error(f"Epoch [{epoch_num+1}/{total_epochs}] Batch {i}: Backward pass error: {backward_e}", exc_info=True)
-            failed_batches += 1
-            continue # Skip optimizer step if backward pass fails
-
-        # Optimizer step: Update model weights
-        try:
-            optimizer.step()
-        except Exception as step_e:
-            log.error(f"Epoch [{epoch_num+1}/{total_epochs}] Batch {i}: Optimizer step error: {step_e}", exc_info=True)
-            # Continue to next batch even if step fails for one batch? Or stop? Continuing for now.
-
-        # Accumulate loss (weighted by batch size for accurate averaging)
-        running_loss += loss.item() * batch_size
-        num_samples_processed += batch_size
-
-    # --- Epoch End ---
-    if total_batches > 0 and failed_batches > total_batches * 0.5:
-        log.error(f"Epoch [{epoch_num+1}/{total_epochs}]: {failed_batches}/{total_batches} batches failed (>50%). Epoch unreliable.")
-        return np.nan
-
-    if num_samples_processed == 0:
-        log.error(f"Epoch [{epoch_num+1}/{total_epochs}]: No samples processed in training epoch.")
-        return np.nan # Return NaN if no samples were processed
-
-    # Calculate average loss for the epoch
-    avg_train_loss = running_loss / num_samples_processed
-    return avg_train_loss
-
-
-def _validate_one_epoch(
-    model: nn.Module,
-    dataloader: Optional[DataLoader], # Validation loader is optional
-    criterion: nn.Module,
-    device: torch.device
-) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """
-    Runs a single validation epoch, calculating loss and metrics (accuracy, F1).
-
-    Args:
-        model (nn.Module): The model to evaluate.
-        dataloader (Optional[DataLoader]): DataLoader for the validation set.
-        criterion (nn.Module): The loss function.
-        device (torch.device): The device to run validation on.
-
-    Returns:
-        Tuple[Optional[float], Optional[float], Optional[float]]:
-            - Average validation loss.
-            - Validation accuracy.
-            - Validation F1-score (binary, pos_label=1).
-            Returns (None, None, None) if validation loader is None or epoch fails.
-    """
-    # If no validation loader is provided, return None for all metrics
-    if not dataloader:
-        return None, None, None
-
-    model.eval() # Set model to evaluation mode
-    val_loss = 0.0
-    num_samples_processed = 0
-    all_preds_val, all_labels_val = [], [] # Lists to store predictions and labels
-
-    with torch.no_grad(): # Disable gradient calculations for validation
-        for batch_data in dataloader:
-            if len(batch_data) != 5:
-                log.warning("Validation Batch: Skipping, incorrect data format from loader.")
-                continue
-
-            # Unpack data and move to device
-            seq_features, static_features, labels, _, _ = batch_data
-            seq_features = seq_features.to(device)
-            static_features = static_features.to(device) if hasattr(model, 'input_dim_static') and model.input_dim_static > 0 else None
-            labels = labels.to(device)
-
-            batch_size = seq_features.size(0)
-            if batch_size == 0: continue
-
-            # Forward pass
-            try:
-                outputs = model(seq_features, static_features)
-            except Exception as model_e:
-                log.error(f"Validation Batch: Model forward pass error: {model_e}", exc_info=True)
-                continue # Skip batch
-
-            # Loss calculation (optional, but good for monitoring)
-            try:
-                # Use view(-1) to flatten both tensors reliably, handling batch size 1
-                loss = criterion(outputs.view(-1), labels.view(-1).float())
-                val_loss += loss.item() * batch_size
-                num_samples_processed += batch_size
-            except Exception as loss_e:
-                 log.warning(f"Validation Batch: Loss calculation error: {loss_e}. Skipping loss for this batch.")
-                 # Still try to get predictions even if loss fails
-
-            # Get predictions (using threshold 0.5 for validation metrics during training)
-            try:
-                # Apply sigmoid to get probabilities, then threshold
-                probs = torch.sigmoid(outputs.view(-1))
-                preds = (probs > 0.5).int()
-                # Ensure preds is iterable before extending (it should be 1D after view(-1))
-                if preds.ndim > 0:
-                    all_preds_val.extend(preds.cpu().numpy().astype(int))
-                else: # Handle the unlikely case it's still 0-d
-                    all_preds_val.append(preds.cpu().item()) # Append the single scalar value
-                all_labels_val.extend(labels.cpu().numpy().astype(int))
-            except Exception as pred_e:
-                log.warning(f"Validation Batch: Prediction processing error: {pred_e}")
-
-    # --- Epoch End ---
-    if num_samples_processed == 0:
-        log.warning("Validation epoch: No samples processed.")
-        return None, None, None
-
-    # Calculate average loss and metrics
-    avg_val_loss = val_loss / num_samples_processed
-    val_accuracy = None
-    val_f1 = None
-
-    # Calculate metrics only if predictions/labels were collected
-    if all_labels_val:
-        try:
-            all_preds_val_np = np.array(all_preds_val)
-            all_labels_val_np = np.array(all_labels_val)
-            val_accuracy = accuracy_score(all_labels_val_np, all_preds_val_np)
-            # Calculate F1 score for the positive class (stress=1)
-            # zero_division=0 prevents warnings if precision/recall are zero for a class
-            val_f1 = f1_score(all_labels_val_np, all_preds_val_np, pos_label=1, average='binary', zero_division=0)
-        except Exception as metric_e:
-            log.error(f"Error calculating validation metrics: {metric_e}", exc_info=True)
-            # Set metrics to None if calculation fails
-            val_accuracy = None
-            val_f1 = None
-
-    return avg_val_loss, val_accuracy, val_f1
 
 # ==============================================================================
 # == Main Training Function ==
@@ -392,198 +292,161 @@ def train_model(
     model: nn.Module,
     train_loader: DataLoader,
     val_loader: Optional[DataLoader],
-    config: Dict[str, Any], # Can be trial-specific config during tuning
+    config: Dict[str, Any],
     device: torch.device,
-    output_dir: Optional[str] # Directory to save best model (optional)
+    output_dir: Optional[str],
 ) -> Tuple[Optional[Dict], Optional[Dict]]:
     """
-    Trains the model with validation, early stopping, and selectable loss function.
-    Can be called directly or from a hyperparameter tuning loop.
+    Trains the model using PyTorch Lightning.
 
     Args:
-        model: The PyTorch model to train (already instantiated and moved to device).
+        model:        The PyTorch model to train (already instantiated).
         train_loader: DataLoader for the training set.
-        val_loader: DataLoader for the validation set (optional, enables early stopping).
-        config: Configuration dictionary.
-        device: The device (CPU or CUDA) to train on.
-        output_dir: Directory to save the best model state dictionary (optional).
+        val_loader:   DataLoader for the validation set (optional).
+        config:       Configuration dictionary.
+        device:       The device (CPU or CUDA) to train on.
+        output_dir:   Directory to save the best model checkpoint (optional).
 
     Returns:
-        Tuple containing:
-            - best_model_state (Optional[Dict]): State dictionary of the best model
-                                                 based on validation loss, or the final
-                                                 model state if no validation/improvement.
-                                                 Returns None if training fails critically.
-            - history (Optional[Dict]): Dictionary containing training and validation
-                                        loss/metrics per epoch. Returns None if training fails.
+        Tuple:
+            - best_state_dict (Optional[Dict]): State dict of the best model by val_loss.
+            - history (Optional[Dict]):         Per-epoch metrics dict.
     """
-    log.info("--- Starting Model Training ---")
+    log.info("--- Starting Model Training (Lightning) ---")
 
-    # --- Basic Setup and Validation ---
-    if not train_loader:
-        log.critical("Training loader is None. Cannot start training.")
-        return None, None
-    if not isinstance(model, nn.Module):
-         log.critical("Invalid model provided.")
-         return None, None
+    # Lazy import to avoid circular dependency with lightning_module.py
+    from lightning_module import StressLightningModule
 
-    # --- Get Training Parameters from Config ---
-    epochs = safe_get(config, ['training_config', 'epochs'], 50)
-    patience = safe_get(config, ['early_stopping', 'patience'], 10)
-    min_delta = safe_get(config, ['early_stopping', 'min_delta'], 0.001)
-    monitor_metric = 'val_loss' # Metric to monitor for early stopping improvement
+    # --- Read config values ---
+    epochs     = safe_get(config, ['training_config', 'epochs'], 50)
+    patience   = safe_get(config, ['early_stopping', 'patience'], 10)
+    min_delta  = safe_get(config, ['early_stopping', 'min_delta'], 0.001)
+    accum      = safe_get(config, ['training_config', 'accumulation_steps'], 1)
+    use_amp    = safe_get(config, ['training_config', 'mixed_precision'], True)
+    is_cuda    = (device.type == "cuda")
 
-    # --- Setup Loss Function and Optimizer ---
-    pos_weight = _calculate_pos_weight(train_loader, device) # Calculate weight for BCE
-    try:
-        criterion = _get_criterion(config, pos_weight) # Get loss function
-    except ImportError: # Catch if FocalLoss wasn't found/imported
-        log.critical("Failed to get criterion due to missing loss definition.")
-        return None, None # Critical failure
+    # Enable cudnn autotuner for fixed-size inputs (free throughput on GPU)
+    if is_cuda:
+        torch.backends.cudnn.benchmark = True
 
-    optimizer = _get_optimizer(model, config) # Get optimizer based on config
+    # Determine precision string for Lightning Trainer
+    if use_amp and is_cuda:
+        if torch.cuda.is_bf16_supported():
+            precision = "bf16-mixed"
+        else:
+            precision = "16-mixed"
+    else:
+        precision = "32"
+    log.info(f"Trainer precision: {precision}")
 
-    # --- Learning Rate Scheduler ---
-    lr_scheduler_config = safe_get(config, ['training_config', 'lr_scheduler'], {})
-    scheduler = None
-    if lr_scheduler_config.get('enabled', True):
-        scheduler_factor = lr_scheduler_config.get('factor', 0.5)
-        scheduler_patience = lr_scheduler_config.get('patience', 3)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=scheduler_factor,
-            patience=scheduler_patience, verbose=False
-        )
-        log.info(f"LR Scheduler: ReduceLROnPlateau (factor={scheduler_factor}, patience={scheduler_patience})")
+    # --- Build Lightning module ---
+    pos_weight = _calculate_pos_weight(train_loader, device)
+    lit_model  = StressLightningModule(model, config, pos_weight)
 
-    # --- Early Stopping Initialization ---
-    best_monitor_value = float('inf') # Initialize for minimizing validation loss
-    epochs_no_improve = 0
-    best_model_state = None # Stores the state_dict of the best model found so far
-    history = {'train_loss': [], 'val_loss': [], 'val_accuracy': [], 'val_f1': []}
-
-    # --- Hardware Optimization ---
-    # Set benchmark flag if using CUDA (can speed up if input sizes don't vary much)
-    if device == torch.device("cuda"):
+    # Optional: torch.compile for graph fusion (PyTorch 2.0+, skip on CPU or non-CUDA)
+    use_compile = safe_get(config, ['training_config', 'torch_compile'], False)
+    if use_compile and is_cuda:
         try:
-            torch.backends.cudnn.benchmark = True
-            log.info("torch.backends.cudnn.benchmark set to True")
-        except Exception as e:
-            log.warning(f"Could not set cudnn.benchmark: {e}")
-    # --- End Hardware Optimization ---
+            lit_model.model = torch.compile(lit_model.model)
+            log.info("torch.compile applied to model (graph fusion enabled).")
+        except Exception as compile_err:
+            log.warning(f"torch.compile failed (non-fatal): {compile_err}")
 
-    # --- Prepare Output Directory and Model Save Path ---
-    best_model_path = None
-    if output_dir: # Only proceed if an output directory is specified
-        if not os.path.exists(output_dir):
-            try:
-                os.makedirs(output_dir); log.info(f"Created output directory: {output_dir}")
-            except OSError as e:
-                log.error(f"Could not create output directory {output_dir}: {e}. Model saving disabled.")
-                output_dir = None # Disable saving if directory creation fails
-        if output_dir: # Check again if creation succeeded or dir already existed
-             best_model_path = os.path.join(output_dir, "best_model.pth")
+    # --- Callbacks ---
+    history_cb = _HistoryCallback()
+    callbacks  = [
+        EarlyStopping(
+            monitor="val_loss",
+            patience=patience,
+            min_delta=min_delta,
+            mode="min",
+        ),
+        LearningRateMonitor(logging_interval="epoch"),
+        history_cb,
+    ]
 
-    # --- Log Training Setup ---
-    model.to(device) # Ensure model is on the correct device before training
-    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    log.info(f"Training Configuration:")
-    log.info(f"  Device: {device}")
-    log.info(f"  Model Type: {model.__class__.__name__}")
-    log.info(f"  Trainable Parameters: {num_params:,}")
-    log.info(f"  Loss function: {type(criterion).__name__}")
-    log.info(f"  Optimizer: {type(optimizer).__name__}")
-    log.info(f"  Max epochs: {epochs}")
-    if val_loader:
-        log.info(f"  Early stopping: Patience={patience}, Min Delta={min_delta}, Metric={monitor_metric}")
-    else:
-        log.info("  Early stopping: Disabled (no validation loader provided).")
-    if best_model_path:
-        log.info(f"  Best model will be saved to: {best_model_path}")
-    else:
-        log.info("  Model saving: Disabled (no output_dir specified or creation failed).")
+    # Estimate steps per epoch for log_every_n_steps (avoid Lightning's default=50 missing small datasets)
+    steps_per_epoch = max(1, len(train_loader) // accum)
+    log_every_n_steps = max(1, min(50, steps_per_epoch))
 
-    # --- Training Loop ---
-    training_start_time = time.time()
-    for epoch in range(epochs):
-        epoch_start_time = time.time()
+    ckpt_callback = None
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        ckpt_callback = ModelCheckpoint(
+            dirpath=output_dir,
+            filename="best_model-{epoch:02d}-{val_loss:.4f}",
+            monitor="val_loss",
+            save_top_k=1,
+            mode="min",
+            save_weights_only=True,
+        )
+        callbacks.append(ckpt_callback)
 
-        # Train one epoch
-        avg_train_loss = _train_one_epoch(model, train_loader, criterion, optimizer, device, epoch, epochs)
-        history['train_loss'].append(avg_train_loss)
+    # --- Logger ---
+    csv_logger = CSVLogger(
+        save_dir=output_dir if output_dir else "outputs/logs",
+        name="stress_training",
+    )
 
-        # Validate one epoch (if val_loader exists)
-        avg_val_loss, val_accuracy, val_f1 = _validate_one_epoch(model, val_loader, criterion, device)
-        history['val_loss'].append(avg_val_loss)
-        history['val_accuracy'].append(val_accuracy)
-        history['val_f1'].append(val_f1)
+    # --- Trainer ---
+    trainer = L.Trainer(
+        max_epochs=epochs,
+        accelerator="gpu" if is_cuda else "cpu",
+        devices=1,
+        precision=precision,
+        accumulate_grad_batches=accum,
+        gradient_clip_val=1.0,
+        callbacks=callbacks,
+        logger=csv_logger,
+        num_sanity_val_steps=0,
+        enable_model_summary=True,
+        enable_progress_bar=True,
+        deterministic=False,
+        enable_checkpointing=(output_dir is not None),
+        log_every_n_steps=log_every_n_steps,
+    )
 
-        epoch_duration = time.time() - epoch_start_time
+    # --- Fit ---
+    trainer.fit(
+        lit_model,
+        train_dataloaders=train_loader,
+        val_dataloaders=val_loader,
+    )
 
-        # Log epoch results
-        log_msg = f"Epoch [{epoch+1}/{epochs}] | Dur: {epoch_duration:.2f}s | Train Loss: {avg_train_loss:.4f}"
-        if avg_val_loss is not None: log_msg += f" | Val Loss: {avg_val_loss:.4f}"
-        if val_accuracy is not None: log_msg += f" | Val Acc: {val_accuracy:.4f}"
-        if val_f1 is not None: log_msg += f" | Val F1: {val_f1:.4f}"
-        log.info(log_msg)
+    history = history_cb.history
 
-        # --- Early Stopping Check ---
-        # Only perform check if validation loader exists and validation loss was calculated
-        if val_loader and avg_val_loss is not None and not np.isnan(avg_val_loss):
-             current_monitor_value = avg_val_loss # Monitor validation loss
-             # Check if current value is better than best value found so far (minus delta)
-             improved = current_monitor_value < best_monitor_value - min_delta
-             if improved:
-                 log.info(f"  Validation loss improved from {best_monitor_value:.4f} to {current_monitor_value:.4f}.")
-                 best_monitor_value = current_monitor_value
-                 epochs_no_improve = 0 # Reset counter
-                 # Save the model state dictionary (in memory)
-                 best_model_state = model.state_dict()
-                 # Save to file if path is valid
-                 if best_model_path:
-                     try:
-                         torch.save(best_model_state, best_model_path)
-                         log.info(f"  Saved best model state to {best_model_path}")
-                     except Exception as e:
-                         log.error(f"  Error saving model to {best_model_path}: {e}")
-             else:
-                 epochs_no_improve += 1
-                 log.debug(f"  Validation loss did not improve for {epochs_no_improve}/{patience} epochs. Best: {best_monitor_value:.4f}")
-                 # Check if patience limit is reached
-                 if epochs_no_improve >= patience:
-                     log.info(f"Early stopping triggered after {epoch + 1} epochs.")
-                     break # Exit training loop
-        # --- End Early Stopping ---
+    # --- Load best checkpoint weights (not last-epoch weights) ---
+    best_state_dict = None
+    if ckpt_callback is not None and ckpt_callback.best_model_path:
+        try:
+            ckpt = torch.load(ckpt_callback.best_model_path, map_location=device, weights_only=True)
+            # ModelCheckpoint with save_weights_only=True stores under "state_dict" key
+            raw = ckpt.get("state_dict", ckpt)
+            # Strip Lightning "model." prefix if present
+            best_state_dict = {
+                k[len("model."):] if k.startswith("model.") else k: v
+                for k, v in raw.items()
+            }
+            log.info(f"Loaded best checkpoint from: {ckpt_callback.best_model_path}")
+        except Exception as ckpt_err:
+            log.warning(f"Could not load best checkpoint (non-fatal): {ckpt_err}. Returning last-epoch weights.")
 
-        # --- Step LR Scheduler ---
-        if scheduler is not None and avg_val_loss is not None and not np.isnan(avg_val_loss):
-            old_lr = optimizer.param_groups[0]['lr']
-            scheduler.step(avg_val_loss)
-            new_lr = optimizer.param_groups[0]['lr']
-            if new_lr != old_lr:
-                log.info(f"  LR reduced: {old_lr:.6f} -> {new_lr:.6f}")
+    if best_state_dict is None:
+        best_state_dict = {
+            k[len("model."):] if k.startswith("model.") else k: v
+            for k, v in lit_model.state_dict().items()
+            if k.startswith("model.")
+        } or lit_model.model.state_dict()
 
-        # Handle case where training loss becomes NaN (e.g., exploding gradients)
-        if np.isnan(avg_train_loss):
-            log.error("Training loss is NaN. Stopping training.")
-            # Return None to indicate failure (useful for hyperparameter tuning)
-            return None, history # Return history up to failure point
+    # --- Optional HF Hub push ---
+    hf_repo_id = safe_get(config, ['save_paths', 'hf_hub_repo_id'], None)
+    if hf_repo_id:
+        try:
+            val_f1_vals = [v for v in history.get("val_f1", []) if not np.isnan(v)]
+            metrics = {"best_val_f1": max(val_f1_vals)} if val_f1_vals else {}
+            lit_model.push_to_hub(hf_repo_id, metrics=metrics)
+        except Exception as hub_err:
+            log.warning(f"HF Hub push failed (non-fatal): {hub_err}")
 
-    # --- Training Loop Finished ---
-    training_duration = time.time() - training_start_time
-    log.info(f"--- Model Training Finished (Duration: {training_duration:.2f}s) ---")
-
-    # If early stopping never triggered saving (e.g., ran for full epochs or no validation),
-    # and training completed without NaN loss, use the final model state.
-    if best_model_state is None and model is not None and (not np.isnan(history['train_loss'][-1]) if history['train_loss'] else True):
-         log.warning("Early stopping did not save a best model state (or validation failed/absent). Using final model state.")
-         best_model_state = model.state_dict()
-         # Optionally save the final state if not already saved and path exists
-         if best_model_path and (not os.path.exists(best_model_path) or epochs_no_improve < patience):
-             try:
-                 torch.save(best_model_state, best_model_path)
-                 log.info(f"Saved final model state to {best_model_path}.")
-             except Exception as e:
-                 log.error(f"Error saving final model state to {best_model_path}: {e}")
-
-    # Return the best model state found and the training history
-    return best_model_state, history
+    log.info("--- Model Training Finished (Lightning) ---")
+    return best_state_dict, history

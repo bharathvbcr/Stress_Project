@@ -1,0 +1,21 @@
+defaults:
+  - _self_
+  - dataset: wesad
+  - model: timesfm
+  - training: standard
+  - processing: default
+
+target_label: "stress"
+run_integrity: false
+force_preprocess: false
+hf_path: "./outputs/processed_data_hf"
+
+save_paths:
+  processed_data: "./outputs/processed_data"
+  static_features_results: "./outputs/static_features"
+  models: "./outputs/models"
+  results: "./outputs/results"
+
+visualization:
+  default_plot_duration_s: 120
+  max_plot_duration_s: 60000

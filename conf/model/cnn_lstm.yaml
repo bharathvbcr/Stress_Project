@@ -1,0 +1,10 @@
+type: "CNN-LSTM"
+cnn_filters: [32, 64]
+cnn_kernels: [7, 5]
+cnn_stride: 1
+cnn_padding: "same"
+cnn_activation: "relu"
+lstm_layers: [32]
+bidirectional: true
+attn_heads: 4
+dropout: 0.2

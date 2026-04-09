@@ -75,11 +75,10 @@ class FocalLoss(nn.Module):
 
         # Apply alpha weighting (optional)
         if self.alpha != -1:
-            # Create alpha weight tensor: alpha for positive class, (1-alpha) for negative class
+            # Vectorized alpha: alpha for positive class, (1-alpha) for negative class
+            # No .to(device) here; assume inputs/targets are already correct
+            # Use torch.where (already optimized in PyTorch)
             alpha_t = torch.where(targets == 1, self.alpha, 1 - self.alpha)
-            # Ensure alpha_t is on the same device as the loss
-            alpha_t = alpha_t.to(F_loss.device)
-            # Apply the weighting
             F_loss = alpha_t * F_loss
 
         # Apply reduction based on the specified mode

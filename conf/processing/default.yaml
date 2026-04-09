@@ -1,0 +1,51 @@
+target_sampling_rate: 64
+parallel_n_jobs: -1
+dataloader_num_workers: 4
+calculate_hrv: true
+calculate_eda_features: true
+calculate_acc_features: true
+calculate_temp_features: true
+calculate_freq_features: true
+calculate_resp_features: false
+calculate_interaction_features: true
+
+features_to_use:
+  chest: ["ECG", "EDA", "ACC", "EMG"]
+  wrist: ["EDA", "BVP", "ACC", "TEMP"]
+
+static_features_to_use:
+  - "HRV_MeanNN"
+  - "HRV_SDNN"
+  - "HRV_RMSSD"
+  - "HRV_pNN50"
+  - "HRV_LFHF"
+  - "HRV_HF"
+  - "HRV_LF"
+  - "HR_Mean"
+  - "HR_Std"
+  - "chest_EDA_Mean"
+  - "chest_EDA_Std"
+  - "SCR_Peaks_N"
+  - "SCR_Peaks_Amplitude_Mean"
+  - "wrist_EDA_Mean"
+  - "wrist_EDA_Std"
+  - "chest_ACC_Mean"
+  - "chest_ACC_Std"
+  - "chest_ACC_Range"
+  - "wrist_ACC_Mean"
+  - "wrist_ACC_Std"
+  - "wrist_ACC_Range"
+  - "chest_ACC_PeakHz"
+  - "wrist_ACC_PeakHz"
+  - "chest_TEMP_Mean"
+  - "chest_TEMP_Slope"
+  - "wrist_TEMP_Mean"
+  - "wrist_TEMP_Slope"
+
+windowing:
+  window_size_sec: 30
+  window_overlap: 0.5
+
+data_splits:
+  validation_ratio: 0.25
+  test_ratio: 0.25

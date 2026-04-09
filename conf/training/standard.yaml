@@ -1,0 +1,20 @@
+epochs: 50
+batch_size: 64
+learning_rate: 0.0001
+optimizer: "lion"
+weight_decay: 0.01
+momentum: 0.9
+loss_function: "bce"
+focal_loss_alpha: 0.5
+focal_loss_gamma: 2.0
+sampling_strategy: "smote"
+mixed_precision: true
+accumulation_steps: 4
+lr_scheduler:
+  enabled: true
+  type: "onecycle"
+  max_lr: 0.001
+
+early_stopping:
+  patience: 5
+  min_delta: 0.0005

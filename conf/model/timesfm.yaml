@@ -1,0 +1,9 @@
+type: "TIMESFM"
+timesfm_checkpoint: "google/timesfm-2.5-200m-pytorch"
+timesfm_context_len: 1024
+timesfm_horizon: 128
+timesfm_normalize_inputs: true
+timesfm_freeze_backbone: true
+timesfm_head_hidden_dim: 128
+timesfm_finetune_last_n_blocks: 4
+dropout: 0.2

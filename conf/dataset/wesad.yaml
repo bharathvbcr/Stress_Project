@@ -1,0 +1,42 @@
+# Dataset Config
+WESAD:
+  load: true
+  path: "D:/Downloads/Datasets/Stress_Project/WESAD/WESAD"
+  subjects: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
+  file_prefix: "S"
+  file_suffix: ".pkl"
+
+NURSE:
+  load: true
+  path: "D:/Downloads/Datasets/Stress_Project/Nurse_Stress_Prediction/Nurse_Stress_Prediction.csv"
+  subjects: null
+  file_type: "csv"
+
+sampling_rates:
+  WESAD_wrist_eda: 4
+  WESAD_wrist_bvp: 64
+  WESAD_wrist_temp: 4
+  WESAD_wrist_acc: 32
+  WESAD_chest_ecg: 700
+  WESAD_chest_eda: 700
+  WESAD_chest_emg: 700
+  WESAD_chest_temp: 700
+  WESAD_chest_acc: 700
+  WESAD_label_label: 700
+  NURSE_wrist_eda: 4.0
+  NURSE_wrist_hr: 1.0
+  NURSE_wrist_temp: 4.0
+  NURSE_wrist_xyz: 32.0
+
+label_mapping:
+  "0": "transient"
+  "1": "baseline"
+  "2": "stress"
+  "3": "amusement"
+  "4": "meditation"
+  "5": "transient"
+  "6": "transient"
+  "7": "transient"
+  nurse_baseline_label_value: "baseline"
+  nurse_stress_label_value: "stress"
+  nurse_other_label_value: "transient"
