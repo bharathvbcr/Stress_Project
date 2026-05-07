@@ -1,106 +1,220 @@
-# Stress Detection Project 🚀
+# StressProject
 
-This project implements a comprehensive deep learning pipeline for detecting stress using physiological signals. It has been hardened into a **Hyper-Optimized, Production-Grade** platform featuring sub-millisecond inference and hardware-saturated training.
+StressProject is a physiological time-series machine learning project for
+stress detection. It supports end-to-end preprocessing, subject-safe dataset
+splitting, PyTorch Lightning training, TimesFM 2.5 foundation-model experiments,
+FastAPI inference, benchmarking, TensorRT export, validation, and repository
+governance tooling.
 
-## 💎 State-of-the-Art (SOTA) Features
+The root repository owns the stress-prediction pipeline. The `timesfm/`
+directory is a packaged TimesFM workspace with its own guidance and should be
+treated as a separate subproject when making changes under that tree.
 
-* **Hyper-Performance Compute:**
-  * **torch.compile:** Automated full-graph operator fusion with `reduce-overhead` and `max-autotune` modes.
-  * **Global TF32:** Enabled TensorFloat-32 for ~3x speedup on Ampere/Ada GPUs.
-  * **CUDNN Auto-Tuner:** Dynamically selects the fastest kernels for your specific hardware.
-  * **Persistent Caching:** Compiled kernels are stored on disk to skip warmup in future sessions.
-* **Zero-Latency Data I/O:**
-  * **Smart Caching:** Pipeline automatically skips redundant preprocessing if the **Apache Arrow** cache exists.
-  * **Memory Mapping:** Loads multi-gigabyte datasets instantly using memory-mapped files via Hugging Face Datasets.
-  * **Aggressive Prefetching:** Custom `DataLoader` logic that saturates the PCIe bus to keep GPUs at 100% utilization.
-* **Hyper-Inference Engine:**
-  * **IO Binding:** Zero-copy inference in `api.py` using pre-allocated GPU buffers.
-  * **TensorRT Support:** Dedicated pipeline to export models to **NVIDIA TensorRT** for sub-millisecond execution.
-  * **CUDAGraphs:** Ready for recorded hardware execution plans, eliminating CPU launch overhead.
-* **Enterprise Data Governance:**
-  * **DVC (Data Version Control):** Integrated DVC for tracking gigabytes of signal data with Git-like efficiency.
-  * **Subject-Group Stratification:** Guaranteed zero subject leakage between training and testing splits.
-* **Advanced Models:**
-  * **TimesFM 2.5:** Leveraging Google's pretrained Foundation Model for zero-shot signal embedding.
-  * **CNN-LSTM-Attention:** Hybrid architectures for temporal and spatial signal dynamics.
+## Capabilities
 
-## 📂 Project Structure
+- **Signal processing pipeline**: load physiological signals, resample and align
+  channels, extract static features, build time-series windows, and generate
+  train/validation/test splits without subject leakage.
+- **Model training**: train LSTM, CNN-LSTM, Transformer, and TimesFM-backed
+  stress classifiers with PyTorch Lightning.
+- **Runtime optimization**: detect CUDA, precision, TF32, TensorRT, and
+  Torch-TensorRT availability through shared runtime utilities.
+- **Inference service**: serve trained checkpoints through a FastAPI API with
+  health reporting, input validation, checkpoint loading, sequence
+  pad/truncate handling, and preallocated inference buffers.
+- **Foundation-model path**: run dedicated TimesFM 2.5 training through
+  `run_pipeline_timesfm.py` and `timesfm_wrapper.py`.
+- **Validation and benchmarking**: run Deepchecks integrity checks, latency
+  benchmarks, TensorRT export, and runtime smoke tests.
+- **Repository intelligence**: use `docs/repo-map.md`, `docs/repo-map.json`,
+  AGENTS guidance, and GitNexus to navigate ownership and impact safely.
 
-```text
-├── main.py                     # 🚀 MODERN ENTRY POINT: Optimized training with Smart Cache & DDP
-├── api.py                      # ⚡ HYPER-API: Sub-millisecond inference with IO Binding
-├── export_trt.py               # 💎 EXPORT TOOL: Generates NVIDIA TensorRT execution engines
-├── benchmark.py                # 📊 PROFILER: Benchmarks latency and throughput gains
-├── dvc_init.py                 # 📦 DATA GOVERNANCE: Bootstraps DVC for signal tracking
-│
-├── lightning_module.py         # 🧠 Core logic (Buffer management, SOTA metrics)
-├── lightning_data.py           # 📥 High-speed DataModule (Arrow/Prefetching)
-├── models.py                   # 🏗️ Model Architectures (TimesFM, CNN-LSTM, Transformer)
-│
-├── preprocessing.py            # Signal conditioning & orchestration
-├── feature_extraction.py       # Parallel (CPU) static feature calculation
-├── signal_processing.py        # Resampling & Alignment logic
-│
-└── outputs/
-    ├── processed_data_hf/      # 📂 HIGH-SPEED CACHE: Arrow formatted datasets
-    ├── models/                 # Saved .ckpt and .ts (TensorRT) files
-    └── results/                # Reports, Plots, and Deepchecks Integrity reports
+## Architecture
+
+```mermaid
+flowchart TD
+  User["User / CLI"] --> Config["Configuration<br/>conf/*.yaml or config.json"]
+  Config --> Entrypoint{"Entrypoint"}
+
+  Entrypoint --> Train["main.py<br/>standard Lightning training"]
+  Entrypoint --> TimesFMTrain["run_pipeline_timesfm.py<br/>TimesFM training"]
+  Entrypoint --> Service["api.py<br/>FastAPI inference"]
+  Entrypoint --> Bench["benchmark.py<br/>latency benchmark"]
+  Entrypoint --> Export["export_trt.py<br/>TensorRT export"]
+  Entrypoint --> Validate["validation.py<br/>Deepchecks validation"]
+
+  Train --> Cache{"Arrow dataset cache?"}
+  Cache -- "missing or forced" --> Preprocess["preprocessing.py<br/>load, resample, align, label"]
+  Preprocess --> Features["feature_extraction.py<br/>static features and HRV"]
+  Features --> Windows["windowing.py<br/>window construction"]
+  Windows --> Splits["data_pipeline.py<br/>subject-safe splits"]
+  Cache -- "available" --> DataModule["lightning_data.py<br/>Arrow/HF DataModule"]
+  Splits --> DataModule
+
+  DataModule --> ModelFactory["models.py<br/>get_model"]
+  TimesFMTrain --> ModelFactory
+  ModelFactory --> Classical["LSTM / CNN-LSTM / Transformer"]
+  ModelFactory --> TimesFM["StressTimesFM"]
+  TimesFM --> TimesFMWrapper["timesfm_wrapper.py<br/>TimesFM 2.5 embeddings"]
+
+  Classical --> Lightning["lightning_module.py<br/>loss, metrics, steps"]
+  TimesFM --> Lightning
+  Lightning --> Trainer["Lightning Trainer<br/>precision, DDP, checkpoints"]
+  Trainer --> Checkpoints["outputs/models<br/>*.ckpt"]
+
+  Checkpoints --> Service
+  Service --> Runtime["utils.py<br/>runtime and checkpoint helpers"]
+  Runtime --> Health["GET /health"]
+  Runtime --> Predict["POST /predict<br/>validate, pad/truncate, infer"]
+
+  Checkpoints --> Export
+  Checkpoints --> Bench
+  DataModule --> Validate
+
+  RepoMap["docs/repo-map.md/json<br/>ownership map"] -. guides .-> Entrypoint
+  Tests["tests/test_runtime_paths.py<br/>runtime smoke tests"] -. verifies .-> DataModule
+  Tests -. verifies .-> Service
+  Tests -. verifies .-> Bench
 ```
 
-## 💻 Hardware Acceleration
+## Project Structure
 
-Optimized for **NVIDIA RTX 30/40-series** GPUs.
+```text
+.
+|-- conf/                       # Hydra configuration groups
+|   |-- config.yaml             # Main config composition
+|   |-- dataset/wesad.yaml      # Dataset metadata and sampling rates
+|   |-- model/*.yaml            # Model-specific settings
+|   |-- processing/default.yaml # Preprocessing/windowing settings
+|   `-- training/standard.yaml  # Training settings
+|-- docs/
+|   |-- repo-map.md             # Canonical repo ownership and dependency map
+|   |-- repo-map.json           # Machine-readable repo map
+|   `-- repo-map-refresh.ps1    # Map refresh helper
+|-- tests/
+|   `-- test_runtime_paths.py   # DataModule/API/benchmark smoke tests
+|-- timesfm/                    # Packaged TimesFM project and local source
+|-- main.py                     # Primary Lightning training entrypoint
+|-- run_pipeline.py             # Legacy/alternate training pipeline
+|-- run_pipeline_timesfm.py     # TimesFM 2.5 training pipeline
+|-- run_lightning.py            # Lightning run helper
+|-- api.py                      # FastAPI inference server
+|-- benchmark.py                # Runtime latency benchmark
+|-- export_trt.py               # TensorRT export helper
+|-- validation.py               # Deepchecks integrity validation
+|-- data_loader.py              # Raw data loading
+|-- preprocessing.py            # Preprocessing orchestration
+|-- signal_processing.py        # Resampling and alignment
+|-- feature_extraction.py       # Static feature and HRV extraction
+|-- windowing.py                # Time-series window construction
+|-- data_pipeline.py            # Splits, sampling, DataLoader construction
+|-- lightning_data.py           # LightningDataModule
+|-- lightning_module.py         # LightningModule wrapper
+|-- models.py                   # Model architectures and factory
+|-- timesfm_wrapper.py          # TimesFM backbone loader and extractor
+|-- utils.py                    # Config, runtime, checkpoint utilities
+|-- config.json                 # Legacy/runtime JSON config
+`-- requirements.txt            # Python dependencies
+```
 
-* **Precision:** Uses `bf16-mixed` or `16-mixed` with high-speed Tensor Core kernels.
-* **Compute:** Employs `torch.backends.cudnn.benchmark` and `torch.compile`.
-* **Scaling:** Supports **Distributed Data Parallel (DDP)** for multi-GPU workstations.
+Runtime and experiment artifacts are not source-of-truth by default:
+`outputs/`, `scratch/`, `.venv/`, and `__pycache__/`.
 
-## 🚀 Usage
+## Installation
 
-### 1. Training with Hyper-Performance
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
-```bash
-# Standard training (Auto-detects GPU/DDP/Compile)
+For CUDA acceleration, install the PyTorch build that matches the local CUDA
+runtime before installing project dependencies. TensorRT export additionally
+requires `tensorrt` and `torch-tensorrt`.
+
+## Common Workflows
+
+### Train the Standard Pipeline
+
+```powershell
 python main.py
+```
 
-# Force rebuild the Arrow cache
+Regenerate the Arrow/Hugging Face dataset cache:
+
+```powershell
 python main.py force_preprocess=True
 ```
 
-### 2. High-Throughput Inference
+### Train the TimesFM Pipeline
 
-```bash
-# Start the FastAPI server with pre-allocated IO Buffers
+```powershell
+python run_pipeline_timesfm.py
+```
+
+### Start the Inference API
+
+```powershell
 python api.py
 ```
 
-### 3. Professional Deployment (TensorRT)
+Check service health:
 
-```bash
-# Convert your best checkpoint to a hardware-native engine
+```powershell
+curl http://localhost:8000/health
+```
+
+Submit a prediction request:
+
+```powershell
+curl -X POST http://localhost:8000/predict `
+  -H "Content-Type: application/json" `
+  -d "{\"sequence\": [[0,0,0,0,0,0,0,0]]}"
+```
+
+The API loads the newest checkpoint from `outputs/models`, rebuilds the model
+from configuration, validates the request, pads or truncates sequences to the
+configured context length, and returns stress probability, label, and
+confidence.
+
+### Benchmark, Validate, and Export
+
+```powershell
+python benchmark.py
+python validation.py
 python export_trt.py --ckpt outputs/models/best_model.ckpt
 ```
 
-### 4. Performance Benchmarking
+### Run Tests
 
-```bash
-# Compare Standard vs CUDAGraph vs TensorRT performance
-python benchmark.py
+```powershell
+python -m pytest tests/test_runtime_paths.py
 ```
 
-## 📦 Installation
+The runtime smoke tests cover Lightning batch handling, Arrow-backed
+DataModule batches, API initialization and prediction on CPU, and benchmark
+execution.
 
-1. **Clone & Setup:**
+## Useful Docs
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+| Document | Purpose |
+| --- | --- |
+| `docs/repo-map.md` | Canonical ownership matrix, source index, and dependency anchors. Start here before broad edits. |
+| `docs/repo-map.json` | Machine-readable version of the repo map for automation and tooling. |
+| `docs/repo-map-refresh.ps1` | Regenerates the markdown and JSON repo maps after structural file changes. |
+| `AGENTS.md` | Top-level agent policy for navigation, ownership, GitNexus use, and repo-map upkeep. |
+| `CLAUDE.md` | Parallel top-level assistant guidance for this repository. |
+| `timesfm/AGENTS.md` | Additional guidance for the packaged TimesFM subproject. |
+| `conf/config.yaml` | Main Hydra config composition. |
+| `config.json` | Legacy/runtime JSON config used by API and utility paths. |
+| `tests/test_runtime_paths.py` | Minimal runtime verification surface for the main Python paths. |
 
-2. **Initialize Data Tracking:**
+Refresh the repo map after structural moves or ownership changes:
 
-    ```bash
-    python dvc_init.py
-    ```
+```powershell
+pwsh .\docs\repo-map-refresh.ps1 -RepoRoot (Get-Location).Path
+```
 
----
-*Developed for SOTA physiological signal processing and high-performance machine learning.*
+GitNexus is configured for this repository. Use it to inspect unfamiliar
+execution flows, run impact analysis before symbol edits, and detect affected
+flows before committing.
