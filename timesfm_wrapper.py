@@ -17,6 +17,8 @@ References
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -29,6 +31,10 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 log = logging.getLogger(__name__)
+
+_LOCAL_TIMESFM_SRC = os.path.join(os.path.dirname(__file__), "timesfm", "src")
+if os.path.isdir(_LOCAL_TIMESFM_SRC) and _LOCAL_TIMESFM_SRC not in sys.path:
+    sys.path.insert(0, _LOCAL_TIMESFM_SRC)
 
 # ---------------------------------------------------------------------------
 # Optional import: fail gracefully if timesfm is not installed
@@ -296,7 +302,7 @@ class TimesFMEmbeddingExtractor(nn.Module):
     def freeze_backbone(self) -> None:
         """Freeze all TimesFM backbone parameters (training phase 1)."""
         if self._backbone is not None:
-            for p in self._backbone.parameters():
+            for p in self._backbone.model.parameters():
                 p.requires_grad_(False)
             log.info("TimesFM backbone frozen (classification head only will train).")
 
@@ -309,11 +315,11 @@ class TimesFMEmbeddingExtractor(nn.Module):
             return
 
         # First freeze everything
-        for p in self._backbone.parameters():
+        for p in self._backbone.model.parameters():
             p.requires_grad_(False)
 
         if last_n_blocks == -1:
-            for p in self._backbone.parameters():
+            for p in self._backbone.model.parameters():
                 p.requires_grad_(True)
             log.info("All TimesFM backbone parameters unfrozen for fine-tuning.")
             return
@@ -331,7 +337,7 @@ class TimesFMEmbeddingExtractor(nn.Module):
 
         if not block_modules:
             # Fallback: unfreeze all if architecture unclear
-            for p in self._backbone.parameters():
+            for p in self._backbone.model.parameters():
                 p.requires_grad_(True)
             log.warning(
                 "Could not locate Transformer blocks; unfreezing all backbone params."
@@ -345,7 +351,7 @@ class TimesFMEmbeddingExtractor(nn.Module):
                 p.requires_grad_(True)
 
         n_trainable = sum(
-            p.numel() for p in self._backbone.parameters() if p.requires_grad
+            p.numel() for p in self._backbone.model.parameters() if p.requires_grad
         )
         log.info(
             f"Unfroze last {last_n_blocks} TimesFM block(s) for fine-tuning. "

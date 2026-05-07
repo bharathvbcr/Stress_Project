@@ -7,7 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 
-from utils import setup_logging
+from utils import setup_logging, safe_get, configure_torch_runtime, log_runtime_capabilities
 from preprocessing import preprocess_all_subjects
 from models import get_model
 from lightning_data import StressDataModule
@@ -27,28 +27,31 @@ def main(cfg: DictConfig):
     # Convert OmegaConf to standard dict for compatibility with existing bio-pipeline
     config = OmegaConf.to_container(cfg, resolve=True)
     
+    # Bridge: Hydra uses 'dataset', 'training', 'processing' groups but code 
+    # expects specific keys like 'datasets', 'sampling_rates', 'label_mapping', etc.
+    if 'dataset' in config:
+        if 'datasets' not in config: config['datasets'] = config['dataset']
+        if 'sampling_rates' not in config: config['sampling_rates'] = config['dataset'].get('sampling_rates', {})
+        if 'label_mapping' not in config: config['label_mapping'] = config['dataset'].get('label_mapping', {})
+    
+    # Bridge model and training config names
+    if 'model' in config and 'model_config' not in config:
+        config['model_config'] = config['model']
+    if 'training' in config and 'training_config' not in config:
+        config['training_config'] = config['training']
+    if 'processing' in config and 'processing_config' not in config:
+        config['processing_config'] = config['processing']
+    
     # Print config for visibility
     log.info("\n" + "="*50 + "\nPHYSIOPULSE SOTA: ADVANCED STRESS INTELLIGENCE\n" + "="*50)
     log.info(f"Configuration:\n{OmegaConf.to_yaml(cfg)}")
 
-    if torch.cuda.is_available():
-        # Global TF32 Enablement (Speedup for Ampere/Ada Lovelace GPUs)
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.set_float32_matmul_precision("high")
-
-        # Aggressive Kernel Tuning (SOTA Warmup)
-        torch.backends.cudnn.benchmark = True
-        
-        # Enable persistent kernel caching to avoid re-warming up in future sessions
-        # Note: This uses the default PyTorch cache directory
-        os.environ["TORCH_COMPILE_DEBUG"] = "0"
-        
-        log.info("SOTA Aggressive Autotuning Engaged: TF32=ON, CUDNN_BENCHMARK=ON")
+    runtime_caps = configure_torch_runtime()
+    log_runtime_capabilities(log, runtime_caps, prefix="Training Runtime")
 
     # 2. Preprocessing (Smart Cache)
     log.info("\n[Stage 1] Preprocessing & Cache Check...")
-    hf_path = cfg.get('hf_path', "./outputs/processed_data_hf")
+    hf_path = safe_get(config, ['hf_path'], "./outputs/processed_data_hf")
     force_preprocess = cfg.get('force_preprocess', False)
     
     # Only run preprocessing if cache is missing or forced
@@ -74,14 +77,8 @@ def main(cfg: DictConfig):
 
     # 4. Model Architecture
     log.info("\n[Stage 3] Building Model...")
-    model_type = cfg.model.type.upper()
-    base_model = get_model(
-        model_type=model_type,
-        input_dim_sequence=datamodule.input_dim_sequence,
-        input_dim_static=datamodule.input_dim_static,
-        model_config=config['model_config'],
-        device=torch.device('cpu') 
-    )
+    model_type = safe_get(config, ['model_config', 'type'], 'CNN-LSTM').upper()
+    base_model = get_model(config, datamodule.input_dim_sequence, datamodule.input_dim_static)
 
     # 5. Lightning Module
     lightning_model = StressLightningModule(
@@ -92,7 +89,8 @@ def main(cfg: DictConfig):
 
     # --- SOTA Optimization: Graph Compilation ---
     # torch.compile provides significant speedups by fusing kernels
-    if hasattr(torch, "compile") and torch.cuda.is_available():
+    use_compile = safe_get(config, ['training_config', 'torch_compile'], False)
+    if use_compile and hasattr(torch, "compile") and runtime_caps["cuda_available"]:
         try:
             log.info("Compiling model (mode='reduce-overhead') for maximum throughput...")
             # 'reduce-overhead' is excellent for non-transformer classification heads
@@ -114,12 +112,12 @@ def main(cfg: DictConfig):
     wandb_logger.experiment.config.update(config)
 
     # 7. Trainer Setup
-    precision = "bf16-mixed" if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else "16-mixed"
+    precision = runtime_caps["precision"]
     
     trainer_defaults = {
         "accelerator": "auto",
-        "devices": "auto", # Scale to all available GPUs
-        "strategy": "ddp_find_unused_parameters_false" if torch.cuda.device_count() > 1 else "auto",
+        "devices": "auto" if runtime_caps["cuda_available"] else 1,
+        "strategy": "ddp_find_unused_parameters_false" if runtime_caps["device_count"] > 1 else "auto",
         "precision": precision,
         "accumulate_grad_batches": cfg.training.accumulation_steps,
         "gradient_clip_val": 1.0,

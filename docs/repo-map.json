@@ -1,0 +1,1790 @@
+{
+  "schema_version": "stressproject-repo-map-json/1.0",
+  "generated_at": "2026-05-06T19:53:04-05:00",
+  "generated_by": "repo-map-refresh.ps1",
+  "repo_root": "C:\\Users\\bhara\\Downloads\\Code\\StressProject",
+  "source_index": "docs/repo-map.md",
+  "canonical": true,
+  "file_count": 144,
+  "include_filters": [
+    "exclude outputs",
+    "exclude scratch",
+    "exclude __pycache__",
+    ".venv",
+    ".git"
+  ],
+  "ownership_matrix": [
+    {
+      "name": "data",
+      "files": [
+        "data_loader.py",
+        "data_pipeline.py",
+        "data_splitting.py",
+        "preprocessing.py",
+        "windowing.py",
+        "conf/*"
+      ]
+    },
+    {
+      "name": "feature",
+      "files": [
+        "feature_engineering.py",
+        "feature_extraction.py",
+        "signal_processing.py",
+        "utils.py",
+        "pytorch_datasets.py"
+      ]
+    },
+    {
+      "name": "modeling",
+      "files": [
+        "main.py",
+        "models.py",
+        "run_pipeline.py",
+        "run_pipeline_timesfm.py",
+        "run_lightning.py",
+        "training.py",
+        "tuning.py",
+        "timesfm_wrapper.py",
+        "lightning_data.py",
+        "lightning_module.py"
+      ]
+    },
+    {
+      "name": "inference",
+      "files": [
+        "api.py",
+        "evaluation.py",
+        "validation.py",
+        "benchmark.py",
+        "sampling.py",
+        "visualization.py",
+        "losses.py",
+        "export_trt.py"
+      ]
+    },
+    {
+      "name": "documentation",
+      "files": [
+        "README.md",
+        "docs/*"
+      ]
+    },
+    {
+      "name": "tests",
+      "files": [
+        "tests/*"
+      ]
+    },
+    {
+      "name": "project_governance",
+      "files": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".claude/*",
+        ".devcouncil/*",
+        ".gitignore",
+        "RESUME_STAR_POINTS.md"
+      ]
+    },
+    {
+      "name": "shared_utilities",
+      "files": [
+        "config.json",
+        "cuda_python.ps1",
+        "convert_to_hf.py",
+        "dashboard.py",
+        "dvc_init.py",
+        "widget_setup.py",
+        "Baseline_Calibration_for_Stress_Response.ipynb",
+        "gitnexus-analyze.err.log",
+        "gitnexus-analyze.out.log",
+        "pytest.ini",
+        "requirements.txt"
+      ]
+    },
+    {
+      "name": "timesfm",
+      "files": [
+        "timesfm/AGENTS.md",
+        "timesfm/README.md",
+        "timesfm/pyproject.toml",
+        "timesfm/src/timesfm/*",
+        "timesfm/timesfm-forecasting/SKILL.md",
+        "timesfm/timesfm-forecasting/references/*",
+        "timesfm/timesfm-forecasting/scripts/*",
+        "timesfm/.gitattributes",
+        "timesfm/.github/*",
+        "timesfm/.gitignore",
+        "timesfm/LICENSE",
+        "timesfm/requirements.txt"
+      ]
+    },
+    {
+      "name": "legacy",
+      "files": [
+        "timesfm/v1/**",
+        "timesfm/timesfm-forecasting/examples/**"
+      ]
+    }
+  ],
+  "call_dependency_anchors": {
+    "main_to_modeling": [
+      "main.py",
+      "utils.py",
+      "data_pipeline.py",
+      "models.py",
+      "lightning_module.py"
+    ],
+    "inference_api_flow": [
+      "api.py",
+      "initialize_model_state",
+      "get_model",
+      "/predict"
+    ],
+    "training_paths": [
+      "run_pipeline_timesfm.py",
+      "run_pipeline.py",
+      "run_lightning.py"
+    ]
+  },
+  "high_coupling_candidates": [
+    "utils.py",
+    "models.py",
+    "preprocessing.py",
+    "data_pipeline.py",
+    "training.py",
+    "lightning_module.py",
+    "run_pipeline_timesfm.py"
+  ],
+  "directories": [
+    {
+      "directory": ".",
+      "file_count": 44,
+      "files": [
+        ".gitignore",
+        "AGENTS.md",
+        "api.py",
+        "Baseline_Calibration_for_Stress_Response.ipynb",
+        "benchmark.py",
+        "CLAUDE.md",
+        "config.json",
+        "convert_to_hf.py",
+        "cuda_python.ps1",
+        "dashboard.py",
+        "data_loader.py",
+        "data_pipeline.py",
+        "data_splitting.py",
+        "dvc_init.py",
+        "evaluation.py",
+        "export_trt.py",
+        "feature_engineering.py",
+        "feature_extraction.py",
+        "gitnexus-analyze.err.log",
+        "gitnexus-analyze.out.log",
+        "lightning_data.py",
+        "lightning_module.py",
+        "losses.py",
+        "main.py",
+        "models.py",
+        "preprocessing.py",
+        "pytest.ini",
+        "pytorch_datasets.py",
+        "README.md",
+        "requirements.txt",
+        "RESUME_STAR_POINTS.md",
+        "run_lightning.py",
+        "run_pipeline_timesfm.py",
+        "run_pipeline.py",
+        "sampling.py",
+        "signal_processing.py",
+        "timesfm_wrapper.py",
+        "training.py",
+        "tuning.py",
+        "utils.py",
+        "validation.py",
+        "visualization.py",
+        "widget_setup.py",
+        "windowing.py"
+      ]
+    },
+    {
+      "directory": ".claude",
+      "file_count": 1,
+      "files": ".claude/settings.local.json"
+    },
+    {
+      "directory": ".devcouncil",
+      "file_count": 2,
+      "files": [
+        ".devcouncil/config.yaml",
+        ".devcouncil/state.sqlite"
+      ]
+    },
+    {
+      "directory": "conf",
+      "file_count": 1,
+      "files": "conf/config.yaml"
+    },
+    {
+      "directory": "conf/dataset",
+      "file_count": 1,
+      "files": "conf/dataset/wesad.yaml"
+    },
+    {
+      "directory": "conf/model",
+      "file_count": 2,
+      "files": [
+        "conf/model/cnn_lstm.yaml",
+        "conf/model/timesfm.yaml"
+      ]
+    },
+    {
+      "directory": "conf/processing",
+      "file_count": 1,
+      "files": "conf/processing/default.yaml"
+    },
+    {
+      "directory": "conf/training",
+      "file_count": 1,
+      "files": "conf/training/standard.yaml"
+    },
+    {
+      "directory": "docs",
+      "file_count": 3,
+      "files": [
+        "docs/repo-map-refresh.ps1",
+        "docs/repo-map.json",
+        "docs/repo-map.md"
+      ]
+    },
+    {
+      "directory": "tests",
+      "file_count": 1,
+      "files": "tests/test_runtime_paths.py"
+    },
+    {
+      "directory": "timesfm",
+      "file_count": 7,
+      "files": [
+        "timesfm/.gitattributes",
+        "timesfm/.gitignore",
+        "timesfm/AGENTS.md",
+        "timesfm/LICENSE",
+        "timesfm/pyproject.toml",
+        "timesfm/README.md",
+        "timesfm/requirements.txt"
+      ]
+    },
+    {
+      "directory": "timesfm/.github/workflows",
+      "file_count": 2,
+      "files": [
+        "timesfm/.github/workflows/main.yml",
+        "timesfm/.github/workflows/manual_publish.yml"
+      ]
+    },
+    {
+      "directory": "timesfm/src/timesfm",
+      "file_count": 2,
+      "files": [
+        "timesfm/src/timesfm/__init__.py",
+        "timesfm/src/timesfm/configs.py"
+      ]
+    },
+    {
+      "directory": "timesfm/src/timesfm.egg-info",
+      "file_count": 5,
+      "files": [
+        "timesfm/src/timesfm.egg-info/dependency_links.txt",
+        "timesfm/src/timesfm.egg-info/PKG-INFO",
+        "timesfm/src/timesfm.egg-info/requires.txt",
+        "timesfm/src/timesfm.egg-info/SOURCES.txt",
+        "timesfm/src/timesfm.egg-info/top_level.txt"
+      ]
+    },
+    {
+      "directory": "timesfm/src/timesfm/flax",
+      "file_count": 5,
+      "files": [
+        "timesfm/src/timesfm/flax/__init__.py",
+        "timesfm/src/timesfm/flax/dense.py",
+        "timesfm/src/timesfm/flax/normalization.py",
+        "timesfm/src/timesfm/flax/transformer.py",
+        "timesfm/src/timesfm/flax/util.py"
+      ]
+    },
+    {
+      "directory": "timesfm/src/timesfm/timesfm_2p5",
+      "file_count": 3,
+      "files": [
+        "timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_base.py",
+        "timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_flax.py",
+        "timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_torch.py"
+      ]
+    },
+    {
+      "directory": "timesfm/src/timesfm/torch",
+      "file_count": 5,
+      "files": [
+        "timesfm/src/timesfm/torch/__init__.py",
+        "timesfm/src/timesfm/torch/dense.py",
+        "timesfm/src/timesfm/torch/normalization.py",
+        "timesfm/src/timesfm/torch/transformer.py",
+        "timesfm/src/timesfm/torch/util.py"
+      ]
+    },
+    {
+      "directory": "timesfm/src/timesfm/utils",
+      "file_count": 1,
+      "files": "timesfm/src/timesfm/utils/xreg_lib.py"
+    },
+    {
+      "directory": "timesfm/timesfm-forecasting",
+      "file_count": 1,
+      "files": "timesfm/timesfm-forecasting/SKILL.md"
+    },
+    {
+      "directory": "timesfm/timesfm-forecasting/examples/anomaly-detection",
+      "file_count": 1,
+      "files": "timesfm/timesfm-forecasting/examples/anomaly-detection/detect_anomalies.py"
+    },
+    {
+      "directory": "timesfm/timesfm-forecasting/examples/covariates-forecasting",
+      "file_count": 1,
+      "files": "timesfm/timesfm-forecasting/examples/covariates-forecasting/demo_covariates.py"
+    },
+    {
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "file_count": 8,
+      "files": [
+        "timesfm/timesfm-forecasting/examples/global-temperature/generate_animation_data.py",
+        "timesfm/timesfm-forecasting/examples/global-temperature/generate_gif.py",
+        "timesfm/timesfm-forecasting/examples/global-temperature/generate_html.py",
+        "timesfm/timesfm-forecasting/examples/global-temperature/README.md",
+        "timesfm/timesfm-forecasting/examples/global-temperature/run_example.sh",
+        "timesfm/timesfm-forecasting/examples/global-temperature/run_forecast.py",
+        "timesfm/timesfm-forecasting/examples/global-temperature/temperature_anomaly.csv",
+        "timesfm/timesfm-forecasting/examples/global-temperature/visualize_forecast.py"
+      ]
+    },
+    {
+      "directory": "timesfm/timesfm-forecasting/references",
+      "file_count": 3,
+      "files": [
+        "timesfm/timesfm-forecasting/references/api_reference.md",
+        "timesfm/timesfm-forecasting/references/data_preparation.md",
+        "timesfm/timesfm-forecasting/references/system_requirements.md"
+      ]
+    },
+    {
+      "directory": "timesfm/timesfm-forecasting/scripts",
+      "file_count": 2,
+      "files": [
+        "timesfm/timesfm-forecasting/scripts/check_system.py",
+        "timesfm/timesfm-forecasting/scripts/forecast_csv.py"
+      ]
+    },
+    {
+      "directory": "timesfm/v1",
+      "file_count": 5,
+      "files": [
+        "timesfm/v1/LICENSE",
+        "timesfm/v1/poetry.lock",
+        "timesfm/v1/pyproject.toml",
+        "timesfm/v1/README.md",
+        "timesfm/v1/TROUBLESHOOTING.md"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/docs",
+      "file_count": 1,
+      "files": "timesfm/v1/docs/contributing.md"
+    },
+    {
+      "directory": "timesfm/v1/experiments/baselines",
+      "file_count": 2,
+      "files": [
+        "timesfm/v1/experiments/baselines/__init__.py",
+        "timesfm/v1/experiments/baselines/timegpt_pipeline.py"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/experiments/extended_benchmarks",
+      "file_count": 6,
+      "files": [
+        "timesfm/v1/experiments/extended_benchmarks/README.md",
+        "timesfm/v1/experiments/extended_benchmarks/run_timegpt.py",
+        "timesfm/v1/experiments/extended_benchmarks/run_timesfm.py",
+        "timesfm/v1/experiments/extended_benchmarks/tfm_extended_new.png",
+        "timesfm/v1/experiments/extended_benchmarks/tfm_results.png",
+        "timesfm/v1/experiments/extended_benchmarks/utils.py"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/experiments/long_horizon_benchmarks",
+      "file_count": 3,
+      "files": [
+        "timesfm/v1/experiments/long_horizon_benchmarks/README.md",
+        "timesfm/v1/experiments/long_horizon_benchmarks/run_eval.py",
+        "timesfm/v1/experiments/long_horizon_benchmarks/tfm_long_horizon.png"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/notebooks",
+      "file_count": 3,
+      "files": [
+        "timesfm/v1/notebooks/covariates.ipynb",
+        "timesfm/v1/notebooks/finetuning_torch.ipynb",
+        "timesfm/v1/notebooks/finetuning.ipynb"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/peft",
+      "file_count": 4,
+      "files": [
+        "timesfm/v1/peft/finetune.py",
+        "timesfm/v1/peft/finetune.sh",
+        "timesfm/v1/peft/README.md",
+        "timesfm/v1/peft/usage.ipynb"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/src/adapter",
+      "file_count": 4,
+      "files": [
+        "timesfm/v1/src/adapter/__init__.py",
+        "timesfm/v1/src/adapter/dora_layers.py",
+        "timesfm/v1/src/adapter/lora_layers.py",
+        "timesfm/v1/src/adapter/utils.py"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/src/finetuning",
+      "file_count": 3,
+      "files": [
+        "timesfm/v1/src/finetuning/__init__.py",
+        "timesfm/v1/src/finetuning/finetuning_example.py",
+        "timesfm/v1/src/finetuning/finetuning_torch.py"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/src/timesfm",
+      "file_count": 9,
+      "files": [
+        "timesfm/v1/src/timesfm/__init__.py",
+        "timesfm/v1/src/timesfm/data_loader.py",
+        "timesfm/v1/src/timesfm/patched_decoder.py",
+        "timesfm/v1/src/timesfm/pytorch_patched_decoder.py",
+        "timesfm/v1/src/timesfm/time_features.py",
+        "timesfm/v1/src/timesfm/timesfm_base.py",
+        "timesfm/v1/src/timesfm/timesfm_jax.py",
+        "timesfm/v1/src/timesfm/timesfm_torch.py",
+        "timesfm/v1/src/timesfm/xreg_lib.py"
+      ]
+    },
+    {
+      "directory": "timesfm/v1/tests",
+      "file_count": 1,
+      "files": "timesfm/v1/tests/test_timesfm.py"
+    }
+  ],
+  "files": [
+    {
+      "path": ".claude/settings.local.json",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/.claude/settings.local.json",
+      "directory": ".claude",
+      "name": "settings.local.json",
+      "extension": ".json",
+      "category": "json",
+      "ownership": "Project governance / meta"
+    },
+    {
+      "path": ".devcouncil/config.yaml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/.devcouncil/config.yaml",
+      "directory": ".devcouncil",
+      "name": "config.yaml",
+      "extension": ".yaml",
+      "category": "yaml",
+      "ownership": "Project governance / meta"
+    },
+    {
+      "path": ".devcouncil/state.sqlite",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/.devcouncil/state.sqlite",
+      "directory": ".devcouncil",
+      "name": "state.sqlite",
+      "extension": ".sqlite",
+      "category": "database",
+      "ownership": "Project governance / meta"
+    },
+    {
+      "path": ".gitignore",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/.gitignore",
+      "directory": ".",
+      "name": ".gitignore",
+      "extension": ".gitignore",
+      "category": "other",
+      "ownership": "Project governance / meta"
+    },
+    {
+      "path": "AGENTS.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/AGENTS.md",
+      "directory": ".",
+      "name": "AGENTS.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Project governance / meta"
+    },
+    {
+      "path": "api.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/api.py",
+      "directory": ".",
+      "name": "api.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Evaluation / inference"
+    },
+    {
+      "path": "Baseline_Calibration_for_Stress_Response.ipynb",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/Baseline_Calibration_for_Stress_Response.ipynb",
+      "directory": ".",
+      "name": "Baseline_Calibration_for_Stress_Response.ipynb",
+      "extension": ".ipynb",
+      "category": "notebook",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "benchmark.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/benchmark.py",
+      "directory": ".",
+      "name": "benchmark.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Evaluation / inference"
+    },
+    {
+      "path": "CLAUDE.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/CLAUDE.md",
+      "directory": ".",
+      "name": "CLAUDE.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Project governance / meta"
+    },
+    {
+      "path": "conf/config.yaml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/conf/config.yaml",
+      "directory": "conf",
+      "name": "config.yaml",
+      "extension": ".yaml",
+      "category": "yaml",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "conf/dataset/wesad.yaml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/conf/dataset/wesad.yaml",
+      "directory": "conf/dataset",
+      "name": "wesad.yaml",
+      "extension": ".yaml",
+      "category": "yaml",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "conf/model/cnn_lstm.yaml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/conf/model/cnn_lstm.yaml",
+      "directory": "conf/model",
+      "name": "cnn_lstm.yaml",
+      "extension": ".yaml",
+      "category": "yaml",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "conf/model/timesfm.yaml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/conf/model/timesfm.yaml",
+      "directory": "conf/model",
+      "name": "timesfm.yaml",
+      "extension": ".yaml",
+      "category": "yaml",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "conf/processing/default.yaml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/conf/processing/default.yaml",
+      "directory": "conf/processing",
+      "name": "default.yaml",
+      "extension": ".yaml",
+      "category": "yaml",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "conf/training/standard.yaml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/conf/training/standard.yaml",
+      "directory": "conf/training",
+      "name": "standard.yaml",
+      "extension": ".yaml",
+      "category": "yaml",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "config.json",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/config.json",
+      "directory": ".",
+      "name": "config.json",
+      "extension": ".json",
+      "category": "json",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "convert_to_hf.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/convert_to_hf.py",
+      "directory": ".",
+      "name": "convert_to_hf.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "cuda_python.ps1",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/cuda_python.ps1",
+      "directory": ".",
+      "name": "cuda_python.ps1",
+      "extension": ".ps1",
+      "category": "shell",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "dashboard.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/dashboard.py",
+      "directory": ".",
+      "name": "dashboard.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "data_loader.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/data_loader.py",
+      "directory": ".",
+      "name": "data_loader.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "data_pipeline.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/data_pipeline.py",
+      "directory": ".",
+      "name": "data_pipeline.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "data_splitting.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/data_splitting.py",
+      "directory": ".",
+      "name": "data_splitting.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "docs/repo-map-refresh.ps1",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/docs/repo-map-refresh.ps1",
+      "directory": "docs",
+      "name": "repo-map-refresh.ps1",
+      "extension": ".ps1",
+      "category": "shell",
+      "ownership": "Documentation"
+    },
+    {
+      "path": "docs/repo-map.json",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/docs/repo-map.json",
+      "directory": "docs",
+      "name": "repo-map.json",
+      "extension": ".json",
+      "category": "json",
+      "ownership": "Documentation"
+    },
+    {
+      "path": "docs/repo-map.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/docs/repo-map.md",
+      "directory": "docs",
+      "name": "repo-map.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Documentation"
+    },
+    {
+      "path": "dvc_init.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/dvc_init.py",
+      "directory": ".",
+      "name": "dvc_init.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "evaluation.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/evaluation.py",
+      "directory": ".",
+      "name": "evaluation.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Evaluation / inference"
+    },
+    {
+      "path": "export_trt.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/export_trt.py",
+      "directory": ".",
+      "name": "export_trt.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Evaluation / inference"
+    },
+    {
+      "path": "feature_engineering.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/feature_engineering.py",
+      "directory": ".",
+      "name": "feature_engineering.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Feature engineering / signal processing"
+    },
+    {
+      "path": "feature_extraction.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/feature_extraction.py",
+      "directory": ".",
+      "name": "feature_extraction.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Feature engineering / signal processing"
+    },
+    {
+      "path": "gitnexus-analyze.err.log",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/gitnexus-analyze.err.log",
+      "directory": ".",
+      "name": "gitnexus-analyze.err.log",
+      "extension": ".log",
+      "category": "other",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "gitnexus-analyze.out.log",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/gitnexus-analyze.out.log",
+      "directory": ".",
+      "name": "gitnexus-analyze.out.log",
+      "extension": ".log",
+      "category": "other",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "lightning_data.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/lightning_data.py",
+      "directory": ".",
+      "name": "lightning_data.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "lightning_module.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/lightning_module.py",
+      "directory": ".",
+      "name": "lightning_module.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "losses.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/losses.py",
+      "directory": ".",
+      "name": "losses.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Evaluation / inference"
+    },
+    {
+      "path": "main.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/main.py",
+      "directory": ".",
+      "name": "main.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "models.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/models.py",
+      "directory": ".",
+      "name": "models.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "preprocessing.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/preprocessing.py",
+      "directory": ".",
+      "name": "preprocessing.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "pytest.ini",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/pytest.ini",
+      "directory": ".",
+      "name": "pytest.ini",
+      "extension": ".ini",
+      "category": "other",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "pytorch_datasets.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/pytorch_datasets.py",
+      "directory": ".",
+      "name": "pytorch_datasets.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Feature engineering / signal processing"
+    },
+    {
+      "path": "README.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/README.md",
+      "directory": ".",
+      "name": "README.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Documentation"
+    },
+    {
+      "path": "requirements.txt",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/requirements.txt",
+      "directory": ".",
+      "name": "requirements.txt",
+      "extension": ".txt",
+      "category": "text",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "RESUME_STAR_POINTS.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/RESUME_STAR_POINTS.md",
+      "directory": ".",
+      "name": "RESUME_STAR_POINTS.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Project governance / meta"
+    },
+    {
+      "path": "run_lightning.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/run_lightning.py",
+      "directory": ".",
+      "name": "run_lightning.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "run_pipeline_timesfm.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/run_pipeline_timesfm.py",
+      "directory": ".",
+      "name": "run_pipeline_timesfm.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "run_pipeline.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/run_pipeline.py",
+      "directory": ".",
+      "name": "run_pipeline.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "sampling.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/sampling.py",
+      "directory": ".",
+      "name": "sampling.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Evaluation / inference"
+    },
+    {
+      "path": "signal_processing.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/signal_processing.py",
+      "directory": ".",
+      "name": "signal_processing.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Feature engineering / signal processing"
+    },
+    {
+      "path": "tests/test_runtime_paths.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/tests/test_runtime_paths.py",
+      "directory": "tests",
+      "name": "test_runtime_paths.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Tests"
+    },
+    {
+      "path": "timesfm_wrapper.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm_wrapper.py",
+      "directory": ".",
+      "name": "timesfm_wrapper.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "timesfm/.gitattributes",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/.gitattributes",
+      "directory": "timesfm",
+      "name": ".gitattributes",
+      "extension": ".gitattributes",
+      "category": "other",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/.github/workflows/main.yml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/.github/workflows/main.yml",
+      "directory": "timesfm/.github/workflows",
+      "name": "main.yml",
+      "extension": ".yml",
+      "category": "yaml",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/.github/workflows/manual_publish.yml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/.github/workflows/manual_publish.yml",
+      "directory": "timesfm/.github/workflows",
+      "name": "manual_publish.yml",
+      "extension": ".yml",
+      "category": "yaml",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/.gitignore",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/.gitignore",
+      "directory": "timesfm",
+      "name": ".gitignore",
+      "extension": ".gitignore",
+      "category": "other",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/AGENTS.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/AGENTS.md",
+      "directory": "timesfm",
+      "name": "AGENTS.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/LICENSE",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/LICENSE",
+      "directory": "timesfm",
+      "name": "LICENSE",
+      "extension": "",
+      "category": "file",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/pyproject.toml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/pyproject.toml",
+      "directory": "timesfm",
+      "name": "pyproject.toml",
+      "extension": ".toml",
+      "category": "config",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/README.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/README.md",
+      "directory": "timesfm",
+      "name": "README.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/requirements.txt",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/requirements.txt",
+      "directory": "timesfm",
+      "name": "requirements.txt",
+      "extension": ".txt",
+      "category": "text",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm.egg-info/dependency_links.txt",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm.egg-info/dependency_links.txt",
+      "directory": "timesfm/src/timesfm.egg-info",
+      "name": "dependency_links.txt",
+      "extension": ".txt",
+      "category": "text",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm.egg-info/PKG-INFO",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm.egg-info/PKG-INFO",
+      "directory": "timesfm/src/timesfm.egg-info",
+      "name": "PKG-INFO",
+      "extension": "",
+      "category": "file",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm.egg-info/requires.txt",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm.egg-info/requires.txt",
+      "directory": "timesfm/src/timesfm.egg-info",
+      "name": "requires.txt",
+      "extension": ".txt",
+      "category": "text",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm.egg-info/SOURCES.txt",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm.egg-info/SOURCES.txt",
+      "directory": "timesfm/src/timesfm.egg-info",
+      "name": "SOURCES.txt",
+      "extension": ".txt",
+      "category": "text",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm.egg-info/top_level.txt",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm.egg-info/top_level.txt",
+      "directory": "timesfm/src/timesfm.egg-info",
+      "name": "top_level.txt",
+      "extension": ".txt",
+      "category": "text",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/__init__.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/__init__.py",
+      "directory": "timesfm/src/timesfm",
+      "name": "__init__.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/configs.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/configs.py",
+      "directory": "timesfm/src/timesfm",
+      "name": "configs.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/flax/__init__.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/flax/__init__.py",
+      "directory": "timesfm/src/timesfm/flax",
+      "name": "__init__.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/flax/dense.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/flax/dense.py",
+      "directory": "timesfm/src/timesfm/flax",
+      "name": "dense.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/flax/normalization.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/flax/normalization.py",
+      "directory": "timesfm/src/timesfm/flax",
+      "name": "normalization.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/flax/transformer.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/flax/transformer.py",
+      "directory": "timesfm/src/timesfm/flax",
+      "name": "transformer.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/flax/util.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/flax/util.py",
+      "directory": "timesfm/src/timesfm/flax",
+      "name": "util.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_base.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_base.py",
+      "directory": "timesfm/src/timesfm/timesfm_2p5",
+      "name": "timesfm_2p5_base.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_flax.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_flax.py",
+      "directory": "timesfm/src/timesfm/timesfm_2p5",
+      "name": "timesfm_2p5_flax.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_torch.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/timesfm_2p5/timesfm_2p5_torch.py",
+      "directory": "timesfm/src/timesfm/timesfm_2p5",
+      "name": "timesfm_2p5_torch.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/torch/__init__.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/torch/__init__.py",
+      "directory": "timesfm/src/timesfm/torch",
+      "name": "__init__.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/torch/dense.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/torch/dense.py",
+      "directory": "timesfm/src/timesfm/torch",
+      "name": "dense.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/torch/normalization.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/torch/normalization.py",
+      "directory": "timesfm/src/timesfm/torch",
+      "name": "normalization.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/torch/transformer.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/torch/transformer.py",
+      "directory": "timesfm/src/timesfm/torch",
+      "name": "transformer.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/torch/util.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/torch/util.py",
+      "directory": "timesfm/src/timesfm/torch",
+      "name": "util.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/src/timesfm/utils/xreg_lib.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/src/timesfm/utils/xreg_lib.py",
+      "directory": "timesfm/src/timesfm/utils",
+      "name": "xreg_lib.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/anomaly-detection/detect_anomalies.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/anomaly-detection/detect_anomalies.py",
+      "directory": "timesfm/timesfm-forecasting/examples/anomaly-detection",
+      "name": "detect_anomalies.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/covariates-forecasting/demo_covariates.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/covariates-forecasting/demo_covariates.py",
+      "directory": "timesfm/timesfm-forecasting/examples/covariates-forecasting",
+      "name": "demo_covariates.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/global-temperature/generate_animation_data.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/global-temperature/generate_animation_data.py",
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "name": "generate_animation_data.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/global-temperature/generate_gif.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/global-temperature/generate_gif.py",
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "name": "generate_gif.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/global-temperature/generate_html.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/global-temperature/generate_html.py",
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "name": "generate_html.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/global-temperature/README.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/global-temperature/README.md",
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "name": "README.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/global-temperature/run_example.sh",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/global-temperature/run_example.sh",
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "name": "run_example.sh",
+      "extension": ".sh",
+      "category": "shell",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/global-temperature/run_forecast.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/global-temperature/run_forecast.py",
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "name": "run_forecast.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/global-temperature/temperature_anomaly.csv",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/global-temperature/temperature_anomaly.csv",
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "name": "temperature_anomaly.csv",
+      "extension": ".csv",
+      "category": "data",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/examples/global-temperature/visualize_forecast.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/examples/global-temperature/visualize_forecast.py",
+      "directory": "timesfm/timesfm-forecasting/examples/global-temperature",
+      "name": "visualize_forecast.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/references/api_reference.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/references/api_reference.md",
+      "directory": "timesfm/timesfm-forecasting/references",
+      "name": "api_reference.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/references/data_preparation.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/references/data_preparation.md",
+      "directory": "timesfm/timesfm-forecasting/references",
+      "name": "data_preparation.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/references/system_requirements.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/references/system_requirements.md",
+      "directory": "timesfm/timesfm-forecasting/references",
+      "name": "system_requirements.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/scripts/check_system.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/scripts/check_system.py",
+      "directory": "timesfm/timesfm-forecasting/scripts",
+      "name": "check_system.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/scripts/forecast_csv.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/scripts/forecast_csv.py",
+      "directory": "timesfm/timesfm-forecasting/scripts",
+      "name": "forecast_csv.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/timesfm-forecasting/SKILL.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/timesfm-forecasting/SKILL.md",
+      "directory": "timesfm/timesfm-forecasting",
+      "name": "SKILL.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "TimesFM package / packaging"
+    },
+    {
+      "path": "timesfm/v1/docs/contributing.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/docs/contributing.md",
+      "directory": "timesfm/v1/docs",
+      "name": "contributing.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/baselines/__init__.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/baselines/__init__.py",
+      "directory": "timesfm/v1/experiments/baselines",
+      "name": "__init__.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/baselines/timegpt_pipeline.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/baselines/timegpt_pipeline.py",
+      "directory": "timesfm/v1/experiments/baselines",
+      "name": "timegpt_pipeline.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/extended_benchmarks/README.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/extended_benchmarks/README.md",
+      "directory": "timesfm/v1/experiments/extended_benchmarks",
+      "name": "README.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/extended_benchmarks/run_timegpt.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/extended_benchmarks/run_timegpt.py",
+      "directory": "timesfm/v1/experiments/extended_benchmarks",
+      "name": "run_timegpt.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/extended_benchmarks/run_timesfm.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/extended_benchmarks/run_timesfm.py",
+      "directory": "timesfm/v1/experiments/extended_benchmarks",
+      "name": "run_timesfm.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/extended_benchmarks/tfm_extended_new.png",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/extended_benchmarks/tfm_extended_new.png",
+      "directory": "timesfm/v1/experiments/extended_benchmarks",
+      "name": "tfm_extended_new.png",
+      "extension": ".png",
+      "category": "image",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/extended_benchmarks/tfm_results.png",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/extended_benchmarks/tfm_results.png",
+      "directory": "timesfm/v1/experiments/extended_benchmarks",
+      "name": "tfm_results.png",
+      "extension": ".png",
+      "category": "image",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/extended_benchmarks/utils.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/extended_benchmarks/utils.py",
+      "directory": "timesfm/v1/experiments/extended_benchmarks",
+      "name": "utils.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/long_horizon_benchmarks/README.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/long_horizon_benchmarks/README.md",
+      "directory": "timesfm/v1/experiments/long_horizon_benchmarks",
+      "name": "README.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/long_horizon_benchmarks/run_eval.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/long_horizon_benchmarks/run_eval.py",
+      "directory": "timesfm/v1/experiments/long_horizon_benchmarks",
+      "name": "run_eval.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/experiments/long_horizon_benchmarks/tfm_long_horizon.png",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/experiments/long_horizon_benchmarks/tfm_long_horizon.png",
+      "directory": "timesfm/v1/experiments/long_horizon_benchmarks",
+      "name": "tfm_long_horizon.png",
+      "extension": ".png",
+      "category": "image",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/LICENSE",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/LICENSE",
+      "directory": "timesfm/v1",
+      "name": "LICENSE",
+      "extension": "",
+      "category": "file",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/notebooks/covariates.ipynb",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/notebooks/covariates.ipynb",
+      "directory": "timesfm/v1/notebooks",
+      "name": "covariates.ipynb",
+      "extension": ".ipynb",
+      "category": "notebook",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/notebooks/finetuning_torch.ipynb",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/notebooks/finetuning_torch.ipynb",
+      "directory": "timesfm/v1/notebooks",
+      "name": "finetuning_torch.ipynb",
+      "extension": ".ipynb",
+      "category": "notebook",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/notebooks/finetuning.ipynb",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/notebooks/finetuning.ipynb",
+      "directory": "timesfm/v1/notebooks",
+      "name": "finetuning.ipynb",
+      "extension": ".ipynb",
+      "category": "notebook",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/peft/finetune.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/peft/finetune.py",
+      "directory": "timesfm/v1/peft",
+      "name": "finetune.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/peft/finetune.sh",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/peft/finetune.sh",
+      "directory": "timesfm/v1/peft",
+      "name": "finetune.sh",
+      "extension": ".sh",
+      "category": "shell",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/peft/README.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/peft/README.md",
+      "directory": "timesfm/v1/peft",
+      "name": "README.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/peft/usage.ipynb",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/peft/usage.ipynb",
+      "directory": "timesfm/v1/peft",
+      "name": "usage.ipynb",
+      "extension": ".ipynb",
+      "category": "notebook",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/poetry.lock",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/poetry.lock",
+      "directory": "timesfm/v1",
+      "name": "poetry.lock",
+      "extension": ".lock",
+      "category": "lock",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/pyproject.toml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/pyproject.toml",
+      "directory": "timesfm/v1",
+      "name": "pyproject.toml",
+      "extension": ".toml",
+      "category": "config",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/README.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/README.md",
+      "directory": "timesfm/v1",
+      "name": "README.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/adapter/__init__.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/adapter/__init__.py",
+      "directory": "timesfm/v1/src/adapter",
+      "name": "__init__.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/adapter/dora_layers.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/adapter/dora_layers.py",
+      "directory": "timesfm/v1/src/adapter",
+      "name": "dora_layers.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/adapter/lora_layers.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/adapter/lora_layers.py",
+      "directory": "timesfm/v1/src/adapter",
+      "name": "lora_layers.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/adapter/utils.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/adapter/utils.py",
+      "directory": "timesfm/v1/src/adapter",
+      "name": "utils.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/finetuning/__init__.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/finetuning/__init__.py",
+      "directory": "timesfm/v1/src/finetuning",
+      "name": "__init__.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/finetuning/finetuning_example.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/finetuning/finetuning_example.py",
+      "directory": "timesfm/v1/src/finetuning",
+      "name": "finetuning_example.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/finetuning/finetuning_torch.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/finetuning/finetuning_torch.py",
+      "directory": "timesfm/v1/src/finetuning",
+      "name": "finetuning_torch.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/__init__.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/__init__.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "__init__.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/data_loader.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/data_loader.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "data_loader.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/patched_decoder.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/patched_decoder.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "patched_decoder.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/pytorch_patched_decoder.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/pytorch_patched_decoder.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "pytorch_patched_decoder.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/time_features.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/time_features.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "time_features.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/timesfm_base.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/timesfm_base.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "timesfm_base.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/timesfm_jax.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/timesfm_jax.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "timesfm_jax.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/timesfm_torch.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/timesfm_torch.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "timesfm_torch.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/src/timesfm/xreg_lib.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/src/timesfm/xreg_lib.py",
+      "directory": "timesfm/v1/src/timesfm",
+      "name": "xreg_lib.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/tests/test_timesfm.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/tests/test_timesfm.py",
+      "directory": "timesfm/v1/tests",
+      "name": "test_timesfm.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "timesfm/v1/TROUBLESHOOTING.md",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/v1/TROUBLESHOOTING.md",
+      "directory": "timesfm/v1",
+      "name": "TROUBLESHOOTING.md",
+      "extension": ".md",
+      "category": "markdown",
+      "ownership": "Legacy / archive"
+    },
+    {
+      "path": "training.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/training.py",
+      "directory": ".",
+      "name": "training.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "tuning.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/tuning.py",
+      "directory": ".",
+      "name": "tuning.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Modeling / training"
+    },
+    {
+      "path": "utils.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/utils.py",
+      "directory": ".",
+      "name": "utils.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Feature engineering / signal processing"
+    },
+    {
+      "path": "validation.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/validation.py",
+      "directory": ".",
+      "name": "validation.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Evaluation / inference"
+    },
+    {
+      "path": "visualization.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/visualization.py",
+      "directory": ".",
+      "name": "visualization.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Evaluation / inference"
+    },
+    {
+      "path": "widget_setup.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/widget_setup.py",
+      "directory": ".",
+      "name": "widget_setup.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Shared utilities / orchestration"
+    },
+    {
+      "path": "windowing.py",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/windowing.py",
+      "directory": ".",
+      "name": "windowing.py",
+      "extension": ".py",
+      "category": "python",
+      "ownership": "Data ingestion / dataset construction"
+    }
+  ]
+}

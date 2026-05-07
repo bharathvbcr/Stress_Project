@@ -359,7 +359,7 @@ def run_static_feature_extraction_parallel(
 
     # --- Run Parallel Calculation ---
     try:
-        parallel_results = Parallel(n_jobs=n_jobs, backend="loky", verbose=5)(
+        parallel_results = Parallel(n_jobs=n_jobs, backend="threading", verbose=5)(
             delayed(calculate_subject_static_features)(subj_id, subj_data, config)
             for subj_id, subj_data in subject_items_for_features
         )

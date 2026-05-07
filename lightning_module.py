@@ -42,6 +42,8 @@ class StressLightningModule(L.LightningModule):
 
         # Save config as hyperparameters (skip large non-serialisable objects)
         self.save_hyperparameters(ignore=["model", "pos_weight"])
+        self.hparams["model_input_dim_sequence"] = getattr(model, "input_dim_sequence", None)
+        self.hparams["model_input_dim_static"] = getattr(model, "input_dim_static", None)
 
         # Build criterion — lazy import to break circular dependency with training.py
         from training import _get_criterion
@@ -72,8 +74,13 @@ class StressLightningModule(L.LightningModule):
         return None
 
     def _unpack(self, batch):
-        """Unpack a 5-tuple DataLoader batch; conditionally keep static features."""
-        seq_features, static_features, labels, _subject_ids, _window_starts = batch
+        """Support both Arrow dict batches and the legacy 5-tuple loader output."""
+        if isinstance(batch, dict):
+            seq_features = batch["sequence"]
+            static_features = batch.get("static")
+            labels = batch["label"]
+        else:
+            seq_features, static_features, labels, *_metadata = batch
         static = self._static_for_model(static_features)
         return seq_features, static, labels
 
@@ -83,6 +90,16 @@ class StressLightningModule(L.LightningModule):
 
     def forward(self, seq: torch.Tensor, static: Optional[torch.Tensor] = None):
         return self.model(seq, static)
+
+    def freeze_backbone(self) -> None:
+        """Expose backbone freeze controls to training entrypoints."""
+        if hasattr(self.model, "freeze_backbone"):
+            self.model.freeze_backbone()
+
+    def unfreeze_backbone(self, last_n_blocks: int = 4) -> None:
+        """Expose backbone unfreeze controls to training entrypoints."""
+        if hasattr(self.model, "unfreeze_backbone"):
+            self.model.unfreeze_backbone(last_n_blocks=last_n_blocks)
 
     # ------------------------------------------------------------------
     # Training step

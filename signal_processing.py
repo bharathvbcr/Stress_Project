@@ -109,8 +109,8 @@ def resample_and_align_subject_signals(
         log.warning(f"{log_prefix} Label Fs not found for dataset '{dataset_id}'. Assuming default: {original_label_fs} Hz.")
 
     # --- Get Features to Process ---
-    chest_features = safe_get(config, ['features_to_use', 'chest'], [])
-    wrist_features = safe_get(config, ['features_to_use', 'wrist'], [])
+    chest_features = safe_get(config, ['processing', 'features_to_use', 'chest'], safe_get(config, ['features_to_use', 'chest'], []))
+    wrist_features = safe_get(config, ['processing', 'features_to_use', 'wrist'], safe_get(config, ['features_to_use', 'wrist'], []))
     all_features_to_align = list(dict.fromkeys(chest_features + wrist_features))
     log.debug(f"{log_prefix} Signals to attempt resampling & align: {all_features_to_align}")
 

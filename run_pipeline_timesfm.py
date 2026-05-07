@@ -41,7 +41,7 @@ import torch
 # Standard workaround for multiple OpenMP runtime initialization conflict
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-from utils import load_config, setup_logging
+from utils import load_config, safe_get, setup_logging
 from data_loader import load_all_datasets
 from preprocessing import preprocess_all_subjects
 from data_pipeline import prepare_dataloaders
@@ -105,7 +105,7 @@ def _patch_config_for_timesfm(config: dict) -> dict:
     return config
 
 
-def _print_gpu_info(device: torch.device) -> None:
+def _print_gpu_info(device: torch.device, config: dict) -> None:
     if device.type == "cuda":
         props = torch.cuda.get_device_properties(0)
         log.info(f"GPU: {props.name}  |  VRAM: {props.total_memory / 1e9:.1f} GB")
@@ -219,7 +219,7 @@ def main() -> None:
     log.info("\n[Stage 5] Building StressTimesFM Model")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f"Device: {device}")
-    _print_gpu_info(device)
+    _print_gpu_info(device, config)
 
     try:
         model = get_model(config, seq_dim, static_dim)

@@ -61,7 +61,7 @@ def create_all_subject_windows(
     label_map = safe_get(config, ['label_mapping'], {})
     # Get the list of static features to actually use from the config
     static_features_to_use_config = [
-        f for f in safe_get(config, ['static_features_to_use'], [])
+        f for f in safe_get(config, ['processing', 'static_features_to_use'], safe_get(config, ['static_features_to_use'], []))
     ]
     # Ensure the number of static features to use matches the expected input_dim_static
     if len(static_features_to_use_config) != input_dim_static:
@@ -264,7 +264,7 @@ def create_all_subject_windows(
             subj_window_labels_dist[assigned_label] += 1
 
         # Clear memory
-        del subj_data, signals_dict, label_signal, subject_signals, binary_labels, labels_orig
+        del subj_data, subject_signals, binary_labels, labels_orig
         
         # Log summary for the subject
         if subj_windows_created > 0:

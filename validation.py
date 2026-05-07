@@ -1,11 +1,19 @@
 import os
 import logging
+import warnings
 import pandas as pd
 import numpy as np
 import torch
 from datasets import load_from_disk
-from deepchecks.tabular.suites import train_test_validation
-from deepchecks.tabular import Dataset
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message=r"pkg_resources is deprecated as an API.*",
+        category=UserWarning,
+        module=r"deepchecks\.core\.serialization\.dataframe\.html",
+    )
+    from deepchecks.tabular.suites import train_test_validation
+    from deepchecks.tabular import Dataset
 
 from utils import setup_logging
 

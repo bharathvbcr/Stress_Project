@@ -6,6 +6,8 @@ import pprint # For pretty printing dictionaries (optional)
 import logging
 from typing import Dict, Any, Optional, List, Union, Tuple
 
+import torch
+
 # Import joblib safely for loading/saving processed data
 try:
     import joblib
@@ -182,6 +184,121 @@ def safe_get(data_dict: Optional[Dict], keys: List[str], default: Any = None) ->
             return default
     # Return the final value if the path was fully traversed
     return temp_dict
+
+
+def infer_model_feature_dims(config: Dict[str, Any]) -> Tuple[int, int]:
+    """
+    Best-effort inference of sequence/static feature dimensions from config.
+
+    This is used by inference and benchmark code paths that need to rebuild a
+    model outside the training DataModule.
+    """
+    explicit_channels = safe_get(config, ['model_config', 'num_channels'])
+    if not isinstance(explicit_channels, int) or explicit_channels <= 0:
+        explicit_channels = safe_get(config, ['model', 'num_channels'])
+
+    if isinstance(explicit_channels, int) and explicit_channels > 0:
+        input_dim_sequence = explicit_channels
+    else:
+        features_to_use = safe_get(config, ['features_to_use'], None)
+        if not isinstance(features_to_use, dict):
+            features_to_use = safe_get(config, ['processing', 'features_to_use'], {})
+        input_dim_sequence = sum(
+            len(feature_list)
+            for feature_list in features_to_use.values()
+            if isinstance(feature_list, list)
+        )
+        if input_dim_sequence <= 0:
+            input_dim_sequence = 8
+
+    static_features = safe_get(config, ['static_features_to_use'], None)
+    if not isinstance(static_features, list):
+        static_features = safe_get(config, ['processing', 'static_features_to_use'], [])
+    input_dim_static = len(static_features) if isinstance(static_features, list) else 0
+    return input_dim_sequence, input_dim_static
+
+
+def resolve_hf_path(config: Dict[str, Any]) -> str:
+    """Return the configured Arrow/HF dataset cache path."""
+    return safe_get(config, ['hf_path'], "./outputs/processed_data_hf")
+
+
+def extract_model_state_dict(checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract only the wrapped model parameters from a Lightning checkpoint.
+    Falls back to returning the provided mapping unchanged when it already
+    resembles a raw model state_dict.
+    """
+    raw_state = checkpoint.get("state_dict", checkpoint)
+    if any(key.startswith("model.") for key in raw_state):
+        return {
+            key[len("model."):]: value
+            for key, value in raw_state.items()
+            if key.startswith("model.")
+        }
+    return raw_state
+
+
+def get_runtime_capabilities() -> Dict[str, Any]:
+    """Collect a compact runtime capability report for logging and health checks."""
+    cuda_available = torch.cuda.is_available()
+    device = torch.device("cuda" if cuda_available else "cpu")
+    device_name = torch.cuda.get_device_name(0) if cuda_available else "cpu"
+    bf16_supported = torch.cuda.is_bf16_supported() if cuda_available else False
+    precision = "bf16-mixed" if bf16_supported else ("16-mixed" if cuda_available else "32")
+
+    try:
+        import tensorrt  # type: ignore  # noqa: F401
+        tensorrt_available = True
+    except ImportError:
+        tensorrt_available = False
+
+    try:
+        import torch_tensorrt  # type: ignore  # noqa: F401
+        torch_tensorrt_available = True
+    except ImportError:
+        torch_tensorrt_available = False
+
+    return {
+        "torch_version": torch.__version__,
+        "cuda_available": cuda_available,
+        "device": str(device),
+        "device_name": device_name,
+        "device_count": torch.cuda.device_count() if cuda_available else 0,
+        "bf16_supported": bf16_supported,
+        "precision": precision,
+        "tensorrt_available": tensorrt_available,
+        "torch_tensorrt_available": torch_tensorrt_available,
+    }
+
+
+def configure_torch_runtime(runtime_caps: Optional[Dict[str, Any]] = None, enable_cudnn_benchmark: bool = True) -> Dict[str, Any]:
+    """Enable safe runtime optimizations when CUDA is available."""
+    runtime_caps = runtime_caps or get_runtime_capabilities()
+    if runtime_caps["cuda_available"]:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision("high")
+        if enable_cudnn_benchmark:
+            torch.backends.cudnn.benchmark = True
+    return runtime_caps
+
+
+def log_runtime_capabilities(logger: logging.Logger, runtime_caps: Optional[Dict[str, Any]] = None, prefix: str = "Runtime") -> Dict[str, Any]:
+    """Log a one-line runtime capability summary."""
+    runtime_caps = runtime_caps or get_runtime_capabilities()
+    logger.info(
+        "%s: torch=%s cuda=%s device=%s device_name=%s precision=%s tensorrt=%s torch_tensorrt=%s",
+        prefix,
+        runtime_caps["torch_version"],
+        runtime_caps["cuda_available"],
+        runtime_caps["device"],
+        runtime_caps["device_name"],
+        runtime_caps["precision"],
+        runtime_caps["tensorrt_available"],
+        runtime_caps["torch_tensorrt_available"],
+    )
+    return runtime_caps
 
 # --- Loading Preprocessed Data ---
 def load_preprocessed_data(config: Dict[str, Any], clear_files: bool = False) -> Tuple[Optional[Dict], Optional[Dict], Optional[Dict]]:

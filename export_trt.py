@@ -15,7 +15,18 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("TRT-Export")
 
-def export_to_trt(ckpt_path, output_path, input_shape=(1, 512, 8)):
+from models import get_model
+from utils import (
+    configure_torch_runtime,
+    extract_model_state_dict,
+    infer_model_feature_dims,
+    load_config,
+    log_runtime_capabilities,
+    safe_get,
+)
+
+
+def export_to_trt(ckpt_path, output_path, config_path="config.json", input_shape=None):
     """
     Exports a trained StressProject model to a TensorRT engine.
     """
@@ -23,14 +34,26 @@ def export_to_trt(ckpt_path, output_path, input_shape=(1, 512, 8)):
         log.error("TensorRT or Torch-TensorRT not found. Please install them to use this script.")
         log.info("Installation: pip install tensorrt torch-tensorrt")
         return
+    runtime_caps = configure_torch_runtime()
+    log_runtime_capabilities(log, runtime_caps, prefix="TensorRT Export Runtime")
+    if not runtime_caps["cuda_available"]:
+        log.error("TensorRT export requires a CUDA-enabled PyTorch runtime.")
+        return
+
+    config = load_config(config_path)
+    if not config:
+        log.error("Failed to load configuration from %s", config_path)
+        return
 
     log.info(f"Loading checkpoint: {ckpt_path}")
-    # Lazy import to avoid dependency issues
-    from lightning_module import StressLightningModule
-    
     try:
-        model_module = StressLightningModule.load_from_checkpoint(ckpt_path, model=None)
-        model = model_module.model.eval().cuda()
+        input_dim_sequence, input_dim_static = infer_model_feature_dims(config)
+        target_len = safe_get(config, ['model_config', 'timesfm_context_len'], 512)
+        input_shape = input_shape or (1, target_len, input_dim_sequence)
+        checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+        model = get_model(config, input_dim_sequence=input_dim_sequence, input_dim_static=input_dim_static)
+        model.load_state_dict(extract_model_state_dict(checkpoint), strict=False)
+        model = model.eval().cuda()
     except Exception as e:
         log.error(f"Failed to load model: {e}")
         return
@@ -60,6 +83,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, required=True, help="Path to the .ckpt file")
     parser.add_argument("--out", type=str, default="./outputs/models/model_trt.ts", help="Output path for TRT engine")
+    parser.add_argument("--config", type=str, default="config.json", help="Path to the JSON config file")
     args = parser.parse_args()
     
-    export_to_trt(args.ckpt, args.out)
+    export_to_trt(args.ckpt, args.out, config_path=args.config)

@@ -1,6 +1,12 @@
 # preprocessing.py (Orchestrates the preprocessing pipeline)
 
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import pandas as pd
 import logging
 import time
@@ -12,12 +18,12 @@ from signal_processing import resample_and_align_subject_signals
 from feature_extraction import run_static_feature_extraction_parallel
 from utils import safe_get
 
-# Import joblib safely for saving
+# Import joblib safely
 try:
-    from joblib import dump
+    from joblib import dump, Parallel, delayed
 except ImportError:
-    dump = None
-    logging.warning("Joblib library not found. Saving processed outputs will fail.")
+    dump, Parallel, delayed = None, None, None
+    logging.warning("Joblib library not found. Parallel processing and saving will fail.")
 
 log = logging.getLogger(__name__)
 
@@ -132,8 +138,13 @@ def preprocess_all_subjects(
         processed_dir = "./outputs/processed_data"
     os.makedirs(os.path.abspath(processed_dir), exist_ok=True)
 
-    # Batching parameters
-    batch_size = max(1, multiprocessing.cpu_count()) # Process N subjects at a time
+    # Batching parameters - honor parallel_n_jobs from config
+    n_jobs = safe_get(config, ['processing_config', 'parallel_n_jobs'], -1)
+    if n_jobs == -1:
+        batch_size = max(1, multiprocessing.cpu_count())
+    else:
+        batch_size = max(1, n_jobs)
+    
     current_batch_raw = []
     
     # Helper to process a batch
@@ -152,16 +163,10 @@ def preprocess_all_subjects(
                 log.error(f"Signal Proc Error S{subj_id}: {e}")
                 return subj_id, None, None, None
             
-            # 2. Static Features (on RAW data subset - effectively just raw_data here)
-            # calculate_subject_static_features expects (subj_id, subj_data, config)
-            # It might use 'signal' key. raw_data has it.
+            # 2. Static Features (on PROCESSED data, which is resampled/aligned)
             feat_df, r_peaks = None, None
             try:
-                # Need to check if calculate_subject_static_features takes raw or processed.
-                # Based on previous reading, it takes raw data dict for the subject.
-                # We need to mimic the structure: {subj_id: raw_data} ? 
-                # No, calculate_subject_static_features takes (subj_id, raw_data, config) directly.
-                res = calculate_subject_static_features(subj_id, raw_data, config)
+                res = calculate_subject_static_features(subj_id, proc_subj, config)
                 if res:
                     feat_df, r_peaks = res[1] if isinstance(res, tuple) and len(res) > 1 else (None, None)
             except Exception as e:
@@ -171,7 +176,7 @@ def preprocess_all_subjects(
 
         # Execute parallel batch
         try:
-            results = Parallel(n_jobs=len(batch_data_list), backend="loky")(
+            results = Parallel(n_jobs=len(batch_data_list), backend="threading")(
                 delayed(worker)(sid, dat) for sid, dat in batch_data_list
             )
         except Exception as e:

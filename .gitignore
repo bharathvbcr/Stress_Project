@@ -28,3 +28,7 @@ directories to save intermediate and final results/
 
 # Temporary / Scratch
 scratch/
+RESUME_STAR_POINTS.md
+.gitnexus
+.devcouncil/state.sqlite
+gitnexus-analyze.*.log

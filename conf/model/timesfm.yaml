@@ -1,6 +1,7 @@
 type: "TIMESFM"
+num_channels: 12
 timesfm_checkpoint: "google/timesfm-2.5-200m-pytorch"
-timesfm_context_len: 1024
+timesfm_context_len: 512
 timesfm_horizon: 128
 timesfm_normalize_inputs: true
 timesfm_freeze_backbone: true

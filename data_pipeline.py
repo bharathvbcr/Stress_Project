@@ -49,8 +49,8 @@ def _calculate_input_dims(
     feature_channel_map: Dict[str, int] = {} # Map feature key to its number of channels
 
     # --- Sequence Dimension (Based on features_to_use in config) ---
-    chest_features_to_use = safe_get(config, ['features_to_use', 'chest'], [])
-    wrist_features_to_use = safe_get(config, ['features_to_use', 'wrist'], [])
+    chest_features_to_use = safe_get(config, ['processing', 'features_to_use', 'chest'], safe_get(config, ['features_to_use', 'chest'], []))
+    wrist_features_to_use = safe_get(config, ['processing', 'features_to_use', 'wrist'], safe_get(config, ['features_to_use', 'wrist'], []))
     temp_feature_order_list = [] # Build the order based on config
     expected_input_dim_sequence = 0
 
@@ -130,7 +130,7 @@ def _calculate_input_dims(
     # --- Static Dimension ---
     # Calculate based on the length of 'static_features_to_use' in config (excluding comments)
     static_features_to_use_config = [
-        f for f in safe_get(config, ['static_features_to_use'], [])
+        f for f in safe_get(config, ['processing', 'static_features_to_use'], safe_get(config, ['static_features_to_use'], []))
     ]
     input_dim_static = len(static_features_to_use_config)
     log.info(f"Combined Static Features specified ({input_dim_static}): {static_features_to_use_config}")

@@ -1,14 +1,14 @@
 # Dataset Config
 WESAD:
   load: true
-  path: "D:/Downloads/Datasets/Stress_Project/WESAD/WESAD"
+  path: "C:/Users/bhara/Downloads/Datasets/Stress_Project/WESAD/WESAD"
   subjects: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17]
   file_prefix: "S"
   file_suffix: ".pkl"
 
 NURSE:
   load: true
-  path: "D:/Downloads/Datasets/Stress_Project/Nurse_Stress_Prediction/Nurse_Stress_Prediction.csv"
+  path: "C:/Users/bhara/Downloads/Datasets/Stress_Project/Nurse_Stress_Prediction/Nurse_Stress_Prediction.csv"
   subjects: null
   file_type: "csv"
 

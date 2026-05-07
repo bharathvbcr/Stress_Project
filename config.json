@@ -2,14 +2,14 @@
     "datasets": {
         "WESAD": {
             "load": true,
-            "path": "D:/Downloads/Datasets/Stress_Project/WESAD/WESAD", 
+            "path": "C:/Users/bhara/Downloads/Datasets/Stress_Project/WESAD/WESAD", 
             "subjects": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17], 
             "file_prefix": "S", 
             "file_suffix": ".pkl" 
         },
         "NURSE": {
             "load": true,
-            "path": "D:/Downloads/Datasets/Stress_Project/Nurse_Stress_Prediction/Nurse_Stress_Prediction.csv", 
+            "path": "C:/Users/bhara/Downloads/Datasets/Stress_Project/Nurse_Stress_Prediction/Nurse_Stress_Prediction.csv", 
             "subjects": null, 
             "file_type": "csv" 
         }
@@ -64,7 +64,7 @@
         "comment": "Settings for preprocessing steps.",
         "target_sampling_rate": 64, 
         "parallel_n_jobs": -1, 
-        "dataloader_num_workers": 4, 
+        "dataloader_num_workers": 2, 
         "comment2": "Flags to control static feature calculation.",
         "calculate_hrv": true, 
         "calculate_eda_features": true, 
@@ -117,7 +117,8 @@
 
         "comment_timesfm": "--- TimesFM 2.5 Foundation Model settings (used when type=TIMESFM) ---",
         "timesfm_checkpoint": "google/timesfm-2.5-200m-pytorch",
-        "timesfm_context_len": 1024,
+        "num_channels": 12,
+        "timesfm_context_len": 512,
         "timesfm_horizon": 128,
         "timesfm_normalize_inputs": true,
         "timesfm_freeze_backbone": true,
@@ -141,7 +142,7 @@
 
     "training_config": {
         "epochs": 50, 
-        "batch_size": 64, 
+        "batch_size": 4, 
         "learning_rate": 0.0001, 
         "optimizer": "lion",
         "momentum": 0.9,
