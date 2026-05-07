@@ -17,6 +17,7 @@ outputs/
 *.joblib
 *.pth
 *.png
+!docs/assets/logo.png
 directories to save intermediate and final results/
 
 # IDEs
