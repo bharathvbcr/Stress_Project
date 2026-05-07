@@ -15,19 +15,61 @@ treated as a separate subproject when making changes under that tree.
 - **Signal processing pipeline**: load physiological signals, resample and align
   channels, extract static features, build time-series windows, and generate
   train/validation/test splits without subject leakage.
+- **Dataset conversion**: convert processed arrays into Arrow/Hugging Face
+  datasets for repeatable training and faster reloads.
 - **Model training**: train LSTM, CNN-LSTM, Transformer, and TimesFM-backed
   stress classifiers with PyTorch Lightning.
+- **Experiment tuning**: run tuning helpers for model and training-parameter
+  sweeps while keeping the canonical Hydra and JSON configs as the source of
+  runtime defaults.
 - **Runtime optimization**: detect CUDA, precision, TF32, TensorRT, and
   Torch-TensorRT availability through shared runtime utilities.
 - **Inference service**: serve trained checkpoints through a FastAPI API with
   health reporting, input validation, checkpoint loading, sequence
   pad/truncate handling, and preallocated inference buffers.
+- **Interactive analysis utilities**: use the dashboard, visualization, and
+  notebook surfaces for inspection, calibration, and result exploration.
 - **Foundation-model path**: run dedicated TimesFM 2.5 training through
   `run_pipeline_timesfm.py` and `timesfm_wrapper.py`.
 - **Validation and benchmarking**: run Deepchecks integrity checks, latency
   benchmarks, TensorRT export, and runtime smoke tests.
+- **Model evaluation**: compute classification metrics, compare experiment
+  outputs, and keep diagnostics separate from training entrypoints.
 - **Repository intelligence**: use `docs/repo-map.md`, `docs/repo-map.json`,
   AGENTS guidance, and GitNexus to navigate ownership and impact safely.
+
+## Application Features
+
+StressProject is organized as a research-to-runtime application rather than a
+single training script. The core app features are:
+
+- **End-to-end stress prediction workflow**: raw physiological signals flow
+  through preprocessing, feature extraction, windowing, subject-safe splitting,
+  model training, checkpoint selection, inference, and diagnostics.
+- **Physiological signal support**: pipeline modules are structured around
+  wearable-style time-series inputs such as EDA, BVP, ACC, TEMP, respiration,
+  labels, and derived static or HRV-style features.
+- **Subject-safe evaluation**: split utilities keep subject boundaries intact
+  so validation and test metrics are not inflated by subject leakage.
+- **Multiple model families**: the training stack supports recurrent,
+  convolutional-recurrent, Transformer, and TimesFM-backed classifiers through
+  the shared model factory.
+- **Foundation-model experimentation**: TimesFM 2.5 integration is isolated
+  behind `timesfm_wrapper.py`, with the packaged `timesfm/` project treated as
+  its own subproject.
+- **FastAPI runtime**: the API exposes health and prediction endpoints, loads
+  the best available checkpoint, validates request shape, normalizes sequence
+  length, and returns probability, class label, and confidence.
+- **Hardware-aware execution**: shared utilities detect CUDA and precision
+  capabilities, allow TF32 where available, and keep CPU fallback viable for
+  smoke tests and local debugging.
+- **Production-oriented export path**: TensorRT export and latency benchmarks
+  provide a path from research checkpoints to optimized inference artifacts.
+- **Validation and observability surfaces**: Deepchecks validation, evaluation
+  helpers, visualization utilities, calibration notebooks, logs, and benchmark
+  outputs support model-quality review.
+- **Governed repository navigation**: the repo map and GitNexus index define
+  ownership, dependencies, execution flows, and change-impact expectations.
 
 ## Architecture
 
@@ -132,6 +174,33 @@ For CUDA acceleration, install the PyTorch build that matches the local CUDA
 runtime before installing project dependencies. TensorRT export additionally
 requires `tensorrt` and `torch-tensorrt`.
 
+## Configuration
+
+The project has two configuration surfaces:
+
+- `conf/config.yaml` composes the main Hydra configuration for dataset,
+  processing, model, and training settings.
+- `config.json` keeps legacy and runtime defaults used by the API and utility
+  scripts.
+
+Key settings to verify before a run:
+
+- Dataset path, subject IDs, sampling rates, and channel names in
+  `conf/dataset/wesad.yaml`.
+- Window size, stride, resampling behavior, and preprocessing controls in
+  `conf/processing/default.yaml`.
+- Model type and architecture-specific hyperparameters in `conf/model/*.yaml`.
+- Batch size, epochs, precision, accelerator settings, and checkpoint behavior
+  in `conf/training/standard.yaml`.
+- API/runtime checkpoint and context-length assumptions in `config.json`.
+
+Hydra overrides can be passed on the command line. For example:
+
+```powershell
+python main.py model=cnn_lstm training.max_epochs=20
+python main.py force_preprocess=True processing.window_size=256
+```
+
 ## Common Workflows
 
 ### Train the Standard Pipeline
@@ -177,6 +246,27 @@ from configuration, validates the request, pads or truncates sequences to the
 configured context length, and returns stress probability, label, and
 confidence.
 
+Primary API surface:
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/health` | `GET` | Reports API readiness and model/checkpoint health. |
+| `/predict` | `POST` | Runs stress prediction for one physiological sequence. |
+
+Prediction requests should provide a numeric two-dimensional `sequence` array:
+
+```json
+{
+  "sequence": [
+    [0.1, 0.2, 0.0, 0.5, 36.7, 0.3, 0.2, 0.1]
+  ]
+}
+```
+
+Prediction responses include the model probability, binary stress label, and
+confidence score. Invalid shapes or non-numeric values should be rejected before
+model execution.
+
 ### Benchmark, Validate, and Export
 
 ```powershell
@@ -184,6 +274,20 @@ python benchmark.py
 python validation.py
 python export_trt.py --ckpt outputs/models/best_model.ckpt
 ```
+
+Additional app and experiment utilities:
+
+```powershell
+python evaluation.py
+python visualization.py
+python tuning.py
+python dashboard.py
+python convert_to_hf.py
+```
+
+Use these only when their input artifacts exist. In particular, visualization,
+dashboard, and evaluation paths usually expect completed training outputs,
+processed datasets, or saved checkpoints.
 
 ### Run Tests
 
@@ -194,6 +298,34 @@ python -m pytest tests/test_runtime_paths.py
 The runtime smoke tests cover Lightning batch handling, Arrow-backed
 DataModule batches, API initialization and prediction on CPU, and benchmark
 execution.
+
+## Outputs and Artifacts
+
+Generated artifacts are intentionally separated from source files:
+
+| Path | Contents |
+| --- | --- |
+| `outputs/models/` | Lightning checkpoints and selected model artifacts. |
+| `outputs/` | Training logs, metrics, benchmark results, and generated runtime outputs. |
+| `scratch/` | Temporary experiments and disposable local work. |
+| `.venv/` | Local Python environment. |
+| `__pycache__/` | Python bytecode cache. |
+
+Do not treat generated artifacts as source-of-truth unless a task explicitly
+targets experiment outputs, model artifacts, or benchmark results.
+
+## Development Notes
+
+- Start broad investigations from `docs/repo-map.md`; it is the canonical
+  ownership and dependency map.
+- Keep root-level scripts focused on stress-prediction workflows. Changes under
+  `timesfm/` follow `timesfm/AGENTS.md` and the packaged TimesFM project
+  conventions.
+- Run GitNexus impact analysis before editing functions, classes, or methods.
+- Refresh the repo map after structural moves, new source files, or ownership
+  changes.
+- Prefer focused tests for the touched runtime path before broad experiment
+  reruns.
 
 ## Useful Docs
 
