@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="StressProject 3D logo" width="760">
+  <img src="docs/assets/logo.png" alt="StressProject 3D logo" width="300">
 </p>
 
 # StressProject
