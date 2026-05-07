@@ -1,11 +1,11 @@
 {
   "schema_version": "stressproject-repo-map-json/1.0",
-  "generated_at": "2026-05-06T19:53:04-05:00",
+  "generated_at": "2026-05-07T10:58:27-05:00",
   "generated_by": "repo-map-refresh.ps1",
   "repo_root": "C:\\Users\\bhara\\Downloads\\Code\\StressProject",
   "source_index": "docs/repo-map.md",
   "canonical": true,
-  "file_count": 144,
+  "file_count": 145,
   "include_filters": [
     "exclude outputs",
     "exclude scratch",
@@ -257,6 +257,11 @@
         "docs/repo-map.json",
         "docs/repo-map.md"
       ]
+    },
+    {
+      "directory": "docs/assets",
+      "file_count": 1,
+      "files": "docs/assets/stressproject-3d-logo.svg"
     },
     {
       "directory": "tests",
@@ -687,6 +692,15 @@
       "extension": ".py",
       "category": "python",
       "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "docs/assets/stressproject-3d-logo.svg",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/docs/assets/stressproject-3d-logo.svg",
+      "directory": "docs/assets",
+      "name": "stressproject-3d-logo.svg",
+      "extension": ".svg",
+      "category": "other",
+      "ownership": "Documentation"
     },
     {
       "path": "docs/repo-map-refresh.ps1",

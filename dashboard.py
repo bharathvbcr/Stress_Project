@@ -5,13 +5,21 @@ import pandas as pd
 import plotly.graph_objects as go
 import os
 import glob
+from pathlib import Path
 from lightning_module import StressLightningModule
 from models import get_model
 from utils import load_config, safe_get
 from datasets import load_from_disk
 
+REPO_ROOT = Path(__file__).resolve().parent
+LOGO_PATH = REPO_ROOT / "docs" / "assets" / "logo.png"
+
 # Page Config
-st.set_page_config(page_title="StressPulse SOTA Dashboard", layout="wide")
+st.set_page_config(
+    page_title="StressProject Dashboard",
+    page_icon=str(LOGO_PATH),
+    layout="wide",
+)
 
 # Theme / CSS
 st.markdown("""
@@ -34,8 +42,15 @@ def load_assets():
     
     return config, latest_ckpt, test_ds
 
+def render_logo_header():
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), use_container_width=True)
+    else:
+        st.title("StressProject")
+
 def main():
-    st.title("🧠 StressPulse SOTA Dashboard")
+    render_logo_header()
+    st.title("StressProject Dashboard")
     st.markdown("---")
     
     config, latest_ckpt, test_ds = load_assets()

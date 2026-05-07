@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="StressProject 3D logo" width="760">
+</p>
+
 # StressProject
 
 StressProject is a physiological time-series machine learning project for

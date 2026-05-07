@@ -155,6 +155,7 @@ flowchart TD
 - `docs/repo-map.md`  
 - `docs/repo-map.json`  
 - `docs/repo-map-refresh.ps1`  
+- `docs/assets/logo.png`
 
 ### `timesfm/`
 - `timesfm/AGENTS.md`  
