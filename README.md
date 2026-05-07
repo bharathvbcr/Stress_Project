@@ -1,8 +1,10 @@
+
+
+# StressProject
+
 <p align="center">
   <img src="docs/assets/logo.png" alt="StressProject 3D logo" width="300">
 </p>
-
-# StressProject
 
 StressProject is a physiological time-series machine learning project for
 stress detection. It supports end-to-end preprocessing, subject-safe dataset
