@@ -1,0 +1,10 @@
+type: "PATCHTST"
+num_channels: 12
+patch_len: 16
+patch_stride: 8
+patchtst_dim: 128
+patchtst_heads: 4
+patchtst_layers: 3
+patchtst_ff_dim: 512
+patchtst_max_tokens: 8192
+dropout: 0.2

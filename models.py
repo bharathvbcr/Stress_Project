@@ -5,7 +5,7 @@ import logging
 from typing import List, Optional, Dict, Any, Tuple
 import math
 
-from utils import safe_get
+from utils import safe_get, select_torch_device
 
 # Optional TimesFM wrapper — imported lazily to avoid hard dependency
 try:
@@ -189,6 +189,118 @@ class StressCNNLSTM(nn.Module):
                  aggregated_output = lstm_out[:, -1, :]
 
         return self.fc(aggregated_output)
+
+# ==============================================================================
+# == StressPatchTST Model (Patch Transformer) ==
+# ==============================================================================
+class StressPatchTST(nn.Module):
+    """
+    Patch-based Transformer for physiological time-series classification.
+
+    This follows the PatchTST idea of modeling fixed-length temporal patches
+    rather than every raw timestep, which reduces attention cost on long windows
+    while preserving local waveform structure.
+    """
+
+    def __init__(
+        self,
+        input_dim_sequence: int,
+        input_dim_static: int,
+        model_config: Dict[str, Any],
+        output_dim: int = 1,
+    ):
+        super().__init__()
+        patch_len = int(safe_get(model_config, ['patch_len'], 16))
+        patch_stride = int(safe_get(model_config, ['patch_stride'], max(1, patch_len // 2)))
+        d_model = int(safe_get(model_config, ['patchtst_dim'], 128))
+        nhead = int(safe_get(model_config, ['patchtst_heads'], 4))
+        num_layers = int(safe_get(model_config, ['patchtst_layers'], 3))
+        dim_feedforward = int(safe_get(model_config, ['patchtst_ff_dim'], d_model * 4))
+        dropout = float(safe_get(model_config, ['dropout'], 0.1))
+        max_tokens = int(safe_get(model_config, ['patchtst_max_tokens'], 8192))
+
+        if patch_len <= 0:
+            raise ValueError("patch_len must be positive")
+        if patch_stride <= 0:
+            raise ValueError("patch_stride must be positive")
+        if d_model <= 0:
+            raise ValueError("patchtst_dim must be positive")
+        if nhead <= 0:
+            raise ValueError("patchtst_heads must be positive")
+        if d_model % nhead != 0:
+            valid_heads = [h for h in range(min(nhead, d_model), 0, -1) if d_model % h == 0]
+            adjusted = valid_heads[0] if valid_heads else 1
+            log.warning(
+                "patchtst_heads=%s does not divide patchtst_dim=%s; using %s heads.",
+                nhead,
+                d_model,
+                adjusted,
+            )
+            nhead = adjusted
+
+        self.input_dim_sequence = input_dim_sequence
+        self.input_dim_static = input_dim_static
+        self.output_dim = output_dim
+        self.patch_len = patch_len
+        self.patch_stride = patch_stride
+
+        self.patch_projection = nn.Linear(patch_len, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, dropout, max_len=max_tokens)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.norm = nn.LayerNorm(d_model)
+
+        fc_input_dim = d_model + input_dim_static
+        self.fc_head = nn.Sequential(
+            nn.Linear(fc_input_dim, dim_feedforward),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, output_dim),
+        )
+
+        log.info(
+            "Initializing StressPatchTST: patch_len=%s stride=%s d_model=%s heads=%s layers=%s",
+            patch_len,
+            patch_stride,
+            d_model,
+            nhead,
+            num_layers,
+        )
+
+    def forward(self, x_sequence: torch.Tensor, x_static: Optional[torch.Tensor] = None) -> torch.Tensor:
+        N, L, F = x_sequence.shape
+        x = x_sequence.permute(0, 2, 1)  # (N, F, L)
+
+        if L < self.patch_len:
+            pad = self.patch_len - L
+            x = nn.functional.pad(x, (pad, 0))
+
+        patches = x.unfold(dimension=-1, size=self.patch_len, step=self.patch_stride)
+        patches = patches.contiguous()  # (N, F, P, patch_len)
+        _, channels, patch_count, _ = patches.shape
+        tokens = self.patch_projection(patches)
+        tokens = tokens.view(N, channels * patch_count, -1)
+        tokens = self.pos_encoder(tokens)
+        encoded = self.transformer_encoder(tokens)
+        pooled = self.norm(encoded).mean(dim=1)
+
+        if self.input_dim_static > 0:
+            if x_static is None:
+                x_static = torch.zeros(N, self.input_dim_static, device=x_sequence.device)
+            if x_static.ndim == 1:
+                x_static = x_static.unsqueeze(0).expand(N, -1)
+            pooled = torch.cat((pooled, x_static), dim=1)
+
+        return self.fc_head(pooled)
+
 
 # ==============================================================================
 # == StressTransformer Model (New) ==
@@ -471,6 +583,7 @@ def get_model(config: Dict[str, Any], input_dim_sequence: int, input_dim_static:
     Supported types (config.json → model_config.type):
       - ``LSTM``       : StressLSTM      (baseline, late fusion)
       - ``CNN-LSTM``   : StressCNNLSTM   (CNN + Bi-LSTM + Attention)
+      - ``PATCHTST``   : StressPatchTST   (patch-based Transformer)
       - ``TRANSFORMER``: StressTransformer
       - ``TIMESFM``    : StressTimesFM   (TimesFM 2.5 foundation model)
     """
@@ -490,8 +603,7 @@ def get_model(config: Dict[str, Any], input_dim_sequence: int, input_dim_static:
             model_type = 'CNN-LSTM'
         else:
             try:
-                import torch
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                device = select_torch_device()
                 model = StressTimesFM(
                     input_dim_sequence=input_dim_sequence,
                     input_dim_static=input_dim_static,
@@ -505,6 +617,17 @@ def get_model(config: Dict[str, Any], input_dim_sequence: int, input_dim_static:
                 log.error(f"Failed to build StressTimesFM: {e}", exc_info=True)
                 log.error("Falling back to CNN-LSTM.")
                 model_type = 'CNN-LSTM'
+
+    # ---- PatchTST-style Transformer ----
+    if model_type in {'PATCHTST', 'PATCH-TST'}:
+        try:
+            model = StressPatchTST(input_dim_sequence, input_dim_static, model_config, output_dim)
+            log.info("StressPatchTST model built successfully.")
+            return model
+        except Exception as e:
+            log.error(f"Failed to build StressPatchTST: {e}", exc_info=True)
+            log.error("Falling back to Transformer.")
+            model_type = 'TRANSFORMER'
 
     # ---- CNN-LSTM ----
     if model_type == 'CNN-LSTM':

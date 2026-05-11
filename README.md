@@ -1,5 +1,3 @@
-
-
 # StressProject
 
 <p align="center">
@@ -23,13 +21,15 @@ treated as a separate subproject when making changes under that tree.
   train/validation/test splits without subject leakage.
 - **Dataset conversion**: convert processed arrays into Arrow/Hugging Face
   datasets for repeatable training and faster reloads.
-- **Model training**: train LSTM, CNN-LSTM, Transformer, and TimesFM-backed
+- **Model training**: train LSTM, CNN-LSTM, PatchTST-style Transformer,
+  Transformer, and TimesFM-backed
   stress classifiers with PyTorch Lightning.
 - **Experiment tuning**: run tuning helpers for model and training-parameter
   sweeps while keeping the canonical Hydra and JSON configs as the source of
   runtime defaults.
-- **Runtime optimization**: detect CUDA, precision, TF32, TensorRT, and
-  Torch-TensorRT availability through shared runtime utilities.
+- **Runtime optimization**: detect CUDA, Apple MPS, MLX installation,
+  precision, TF32, TensorRT, and Torch-TensorRT availability through shared
+  runtime utilities.
 - **Inference service**: serve trained checkpoints through a FastAPI API with
   health reporting, input validation, checkpoint loading, sequence
   pad/truncate handling, and preallocated inference buffers.
@@ -58,17 +58,17 @@ single training script. The core app features are:
 - **Subject-safe evaluation**: split utilities keep subject boundaries intact
   so validation and test metrics are not inflated by subject leakage.
 - **Multiple model families**: the training stack supports recurrent,
-  convolutional-recurrent, Transformer, and TimesFM-backed classifiers through
-  the shared model factory.
+  convolutional-recurrent, PatchTST-style, Transformer, and TimesFM-backed
+  classifiers through the shared model factory.
 - **Foundation-model experimentation**: TimesFM 2.5 integration is isolated
   behind `timesfm_wrapper.py`, with the packaged `timesfm/` project treated as
   its own subproject.
 - **FastAPI runtime**: the API exposes health and prediction endpoints, loads
   the best available checkpoint, validates request shape, normalizes sequence
   length, and returns probability, class label, and confidence.
-- **Hardware-aware execution**: shared utilities detect CUDA and precision
-  capabilities, allow TF32 where available, and keep CPU fallback viable for
-  smoke tests and local debugging.
+- **Hardware-aware execution**: shared utilities detect CUDA, Apple MPS, MLX
+  installation, and precision capabilities, allow TF32 where available, and
+  keep CPU fallback viable for smoke tests and local debugging.
 - **Production-oriented export path**: TensorRT export and latency benchmarks
   provide a path from research checkpoints to optimized inference artifacts.
 - **Validation and observability surfaces**: Deepchecks validation, evaluation
@@ -101,7 +101,7 @@ flowchart TD
 
   DataModule --> ModelFactory["models.py<br/>get_model"]
   TimesFMTrain --> ModelFactory
-  ModelFactory --> Classical["LSTM / CNN-LSTM / Transformer"]
+  ModelFactory --> Classical["LSTM / CNN-LSTM / PatchTST / Transformer"]
   ModelFactory --> TimesFM["StressTimesFM"]
   TimesFM --> TimesFMWrapper["timesfm_wrapper.py<br/>TimesFM 2.5 embeddings"]
 
@@ -177,8 +177,12 @@ pip install -r requirements.txt
 ```
 
 For CUDA acceleration, install the PyTorch build that matches the local CUDA
-runtime before installing project dependencies. TensorRT export additionally
-requires `tensorrt` and `torch-tensorrt`.
+runtime before installing project dependencies. On Apple silicon, use the
+standard PyTorch macOS build and run with `STRESS_TORCH_DEVICE=mps` to force
+MPS if auto-detection is not desired. MLX is detected for visibility, but the
+current training stack is PyTorch/Lightning; a true MLX training path would
+require porting model and optimizer code to MLX arrays. TensorRT export
+additionally requires `tensorrt` and `torch-tensorrt`.
 
 ## Configuration
 
@@ -203,11 +207,45 @@ Key settings to verify before a run:
 Hydra overrides can be passed on the command line. For example:
 
 ```powershell
-python main.py model=cnn_lstm training.max_epochs=20
-python main.py force_preprocess=True processing.window_size=256
+python main.py model=cnn_lstm training.epochs=20
+python main.py force_preprocess=True processing.windowing.window_size_sec=30
 ```
 
 ## Common Workflows
+
+### Optimized Hardware Runs
+
+The training stack selects CUDA first, then Apple MPS, then CPU. Override the
+selection when you need an explicit backend:
+
+```powershell
+$env:STRESS_TORCH_DEVICE = "cuda"; python main.py
+$env:STRESS_TORCH_DEVICE = "mps";  python main.py
+$env:STRESS_TORCH_DEVICE = "cpu";  python main.py
+```
+
+CUDA runs use TF32 where available and Lightning mixed precision from runtime
+capability detection. MPS runs use `accelerator="mps"` with 32-bit precision,
+which is the stable PyTorch/Lightning path on Apple silicon. MLX installation is
+logged for visibility, but the current training code is PyTorch based; a true
+MLX run would require porting the model, optimizer, and data path to MLX arrays.
+
+Use PatchTST for a modern patch-based Transformer baseline:
+
+```powershell
+python main.py model=patchtst
+```
+
+CUDA graph compilation is available as an opt-in because Windows and compiler
+setup can make `torch.compile` environment-sensitive:
+
+```powershell
+python main.py training.torch_compile=true
+```
+
+DataLoader throughput is controlled in `conf/processing/default.yaml` and
+`config.json` with `dataloader_num_workers`, `dataloader_prefetch_factor`,
+`pin_memory`, and `persistent_workers`.
 
 ### Train the Standard Pipeline
 

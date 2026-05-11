@@ -324,6 +324,7 @@ def train_model(
     accum      = safe_get(config, ['training_config', 'accumulation_steps'], 1)
     use_amp    = safe_get(config, ['training_config', 'mixed_precision'], True)
     is_cuda    = (device.type == "cuda")
+    is_mps     = (device.type == "mps")
 
     # Enable cudnn autotuner for fixed-size inputs (free throughput on GPU)
     if is_cuda:
@@ -391,7 +392,7 @@ def train_model(
     # --- Trainer ---
     trainer = L.Trainer(
         max_epochs=epochs,
-        accelerator="gpu" if is_cuda else "cpu",
+        accelerator="gpu" if is_cuda else ("mps" if is_mps else "cpu"),
         devices=1,
         precision=precision,
         accumulate_grad_batches=accum,

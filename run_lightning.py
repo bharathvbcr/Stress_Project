@@ -66,8 +66,9 @@ def main():
     precision = runtime_caps["precision"]
     
     trainer_defaults = {
-        "accelerator": "auto",
-        "devices": "auto" if runtime_caps["cuda_available"] else 1,
+        "accelerator": runtime_caps["accelerator"],
+        "devices": runtime_caps["devices"],
+        "strategy": runtime_caps["strategy"],
         "precision": precision,
         "accumulate_grad_batches": acc_steps,
         "gradient_clip_val": 1.0,

@@ -35,7 +35,13 @@ class StressDataModule(L.LightningDataModule):
         if not isinstance(self.num_workers, int) or self.num_workers < 0:
             self.num_workers = workers_default
         self.num_workers = min(self.num_workers, os.cpu_count() or self.num_workers or 1)
-        self.pin_memory = torch.cuda.is_available()
+        pin_memory_cfg = safe_get(config, ['processing', 'pin_memory'], None)
+        self.pin_memory = torch.cuda.is_available() if pin_memory_cfg is None else bool(pin_memory_cfg and torch.cuda.is_available())
+        self.persistent_workers = bool(safe_get(config, ['processing', 'persistent_workers'], True))
+        prefetch_default = 4 if torch.cuda.is_available() else 2
+        self.prefetch_factor = safe_get(config, ['processing', 'dataloader_prefetch_factor'], prefetch_default)
+        if not isinstance(self.prefetch_factor, int) or self.prefetch_factor < 1:
+            self.prefetch_factor = prefetch_default
         
         self.train_ds = None
         self.val_ds = None
@@ -89,10 +95,10 @@ class StressDataModule(L.LightningDataModule):
             "shuffle": True,
             "pin_memory": self.pin_memory,
             "num_workers": num_workers,
-            "persistent_workers": (num_workers > 0),
+            "persistent_workers": (num_workers > 0 and self.persistent_workers),
         }
         if num_workers > 0:
-            loader_kwargs["prefetch_factor"] = 2
+            loader_kwargs["prefetch_factor"] = self.prefetch_factor
         return DataLoader(self.train_ds, **loader_kwargs)
 
     def val_dataloader(self):
@@ -102,10 +108,10 @@ class StressDataModule(L.LightningDataModule):
             "shuffle": False,
             "pin_memory": self.pin_memory,
             "num_workers": num_workers,
-            "persistent_workers": (num_workers > 0),
+            "persistent_workers": (num_workers > 0 and self.persistent_workers),
         }
         if num_workers > 0:
-            loader_kwargs["prefetch_factor"] = 2
+            loader_kwargs["prefetch_factor"] = self.prefetch_factor
         return DataLoader(self.val_ds, **loader_kwargs)
 
     def test_dataloader(self):
@@ -115,10 +121,10 @@ class StressDataModule(L.LightningDataModule):
             "shuffle": False,
             "pin_memory": self.pin_memory,
             "num_workers": num_workers,
-            "persistent_workers": (num_workers > 0),
+            "persistent_workers": (num_workers > 0 and self.persistent_workers),
         }
         if num_workers > 0:
-            loader_kwargs["prefetch_factor"] = 2
+            loader_kwargs["prefetch_factor"] = self.prefetch_factor
         return DataLoader(self.test_ds, **loader_kwargs)
 
     def _calculate_pos_weight(self):

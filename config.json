@@ -65,6 +65,9 @@
         "target_sampling_rate": 64, 
         "parallel_n_jobs": -1, 
         "dataloader_num_workers": 2, 
+        "dataloader_prefetch_factor": 4,
+        "pin_memory": true,
+        "persistent_workers": true,
         "comment2": "Flags to control static feature calculation.",
         "calculate_hrv": true, 
         "calculate_eda_features": true, 
@@ -113,7 +116,7 @@
 
     "model_config": {
         "type": "TIMESFM",
-        "comment_type": "Options: CNN-LSTM | TRANSFORMER | LSTM | TIMESFM",
+        "comment_type": "Options: CNN-LSTM | PATCHTST | TRANSFORMER | LSTM | TIMESFM",
 
         "comment_timesfm": "--- TimesFM 2.5 Foundation Model settings (used when type=TIMESFM) ---",
         "timesfm_checkpoint": "google/timesfm-2.5-200m-pytorch",
@@ -126,6 +129,15 @@
         "timesfm_head_hidden_dim": 128,
         "timesfm_finetune_last_n_blocks": 4,
         "comment_finetune_blocks": "Number of TimesFM transformer blocks to unfreeze during Phase-2.",
+
+        "comment_patchtst": "--- PatchTST-style Transformer settings (used when type=PATCHTST) ---",
+        "patch_len": 16,
+        "patch_stride": 8,
+        "patchtst_dim": 128,
+        "patchtst_heads": 4,
+        "patchtst_layers": 3,
+        "patchtst_ff_dim": 512,
+        "patchtst_max_tokens": 8192,
 
         "comment_cnn": "--- CNN-LSTM settings (used when type=CNN-LSTM) ---",
         "cnn_filters": [32, 64],
@@ -151,6 +163,7 @@
         "focal_loss_gamma": 2.0, 
         "sampling_strategy": "smote",
         "mixed_precision": true,
+        "torch_compile": false,
         "accumulation_steps": 4,
         "lr_scheduler": {
             "enabled": true,

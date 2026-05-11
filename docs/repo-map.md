@@ -95,7 +95,6 @@ flowchart TD
 - `.devcouncil/config.yaml`  
 - `.devcouncil/state.sqlite`  
 - `AGENTS.md`  
-- `.gitignore`  
 - `api.py`  
 - `Baseline_Calibration_for_Stress_Response.ipynb`  
 - `benchmark.py`  
@@ -144,6 +143,7 @@ flowchart TD
 - `conf/config.yaml`  
 - `conf/dataset/wesad.yaml`  
 - `conf/model/cnn_lstm.yaml`  
+- `conf/model/patchtst.yaml`  
 - `conf/model/timesfm.yaml`  
 - `conf/processing/default.yaml`  
 - `conf/training/standard.yaml`  
@@ -162,7 +162,6 @@ flowchart TD
 - `timesfm/.gitattributes`  
 - `timesfm/.github/workflows/main.yml`  
 - `timesfm/.github/workflows/manual_publish.yml`  
-- `timesfm/.gitignore`  
 - `timesfm/LICENSE`  
 - `timesfm/README.md`  
 - `timesfm/pyproject.toml`  
@@ -291,11 +290,11 @@ flowchart TD
 - **Tests**
   - `tests/**`
 - **Project governance / meta**
-  - `AGENTS.md`, `CLAUDE.md`, `.claude/**`, `.devcouncil/**`, `.gitignore`, `RESUME_STAR_POINTS.md`
+  - `AGENTS.md`, `CLAUDE.md`, `.claude/**`, `.devcouncil/**`, `RESUME_STAR_POINTS.md`
 - **Shared utilities / orchestration**
   - `config.json`, `cuda_python.ps1`, `convert_to_hf.py`, `dashboard.py`, `dvc_init.py`, `widget_setup.py`, `Baseline_Calibration_for_Stress_Response.ipynb`, `gitnexus-analyze.err.log`, `gitnexus-analyze.out.log`, `pytest.ini`, `requirements.txt`
 - **TimesFM package / packaging**
-  - `timesfm/AGENTS.md`, `timesfm/README.md`, `timesfm/pyproject.toml`, `timesfm/src/timesfm/**`, `timesfm/timesfm-forecasting/SKILL.md`, `timesfm/timesfm-forecasting/references/**`, `timesfm/timesfm-forecasting/scripts/**`, `timesfm/.gitattributes`, `timesfm/.github/**`, `timesfm/.gitignore`, `timesfm/LICENSE`, `timesfm/requirements.txt`
+  - `timesfm/AGENTS.md`, `timesfm/README.md`, `timesfm/pyproject.toml`, `timesfm/src/timesfm/**`, `timesfm/timesfm-forecasting/SKILL.md`, `timesfm/timesfm-forecasting/references/**`, `timesfm/timesfm-forecasting/scripts/**`, `timesfm/.gitattributes`, `timesfm/.github/**`, `timesfm/LICENSE`, `timesfm/requirements.txt`
 - **Legacy / archive**
   - `timesfm/v1/**`, `timesfm/timesfm-forecasting/examples/**`
 

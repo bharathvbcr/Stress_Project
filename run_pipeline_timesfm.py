@@ -41,7 +41,14 @@ import torch
 # Standard workaround for multiple OpenMP runtime initialization conflict
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-from utils import load_config, safe_get, setup_logging
+from utils import (
+    configure_torch_runtime,
+    load_config,
+    log_runtime_capabilities,
+    safe_get,
+    select_torch_device,
+    setup_logging,
+)
 from data_loader import load_all_datasets
 from preprocessing import preprocess_all_subjects
 from data_pipeline import prepare_dataloaders
@@ -113,8 +120,12 @@ def _print_gpu_info(device: torch.device, config: dict) -> None:
             f"SOTA Optimization Plan: Optimizer=LION, Scheduler=OneCycle, "
             f"AMP=Enabled, Accumulation={safe_get(config, ['training_config', 'accumulation_steps'], 4)}"
         )
+    elif device.type == "mps":
+        log.info(
+            "Apple MPS acceleration enabled. MLX is detected separately; this entrypoint trains through PyTorch/Lightning."
+        )
     else:
-        log.info("Running on CPU — Phase-1 will be slow.  Consider using a GPU.")
+        log.info("Running on CPU; Phase-1 will be slow. Consider CUDA or Apple MPS acceleration.")
 
 
 def _build_phase2_config(config: dict, phase2_lr_factor: float) -> dict:
@@ -134,9 +145,8 @@ def _build_phase2_config(config: dict, phase2_lr_factor: float) -> dict:
 # ==================================================================
 
 def main() -> None:
-    # Optimize matmul on CUDA GPUs
-    if torch.cuda.is_available():
-        torch.set_float32_matmul_precision("high")
+    runtime_caps = configure_torch_runtime()
+    log_runtime_capabilities(log, runtime_caps, prefix="Training Runtime")
 
     log.info("=" * 70)
     log.info("  StressProject — TimesFM 2.5 Foundation Model Pipeline")
@@ -217,7 +227,7 @@ def main() -> None:
     # Stage 5: Build Model
     # ----------------------------------------------------------------
     log.info("\n[Stage 5] Building StressTimesFM Model")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = select_torch_device(runtime_caps)
     log.info(f"Device: {device}")
     _print_gpu_info(device, config)
 

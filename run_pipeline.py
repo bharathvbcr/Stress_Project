@@ -6,7 +6,13 @@ import sys
 # Standard workaround for multiple OpenMP runtime initialization conflict
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
-from utils import load_config, setup_logging
+from utils import (
+    configure_torch_runtime,
+    load_config,
+    log_runtime_capabilities,
+    select_torch_device,
+    setup_logging,
+)
 from data_loader import load_all_datasets
 from preprocessing import preprocess_all_subjects
 from data_pipeline import prepare_dataloaders
@@ -27,6 +33,8 @@ def main():
     if not config:
         log.error("Failed to load configuration. Exiting.")
         return
+    runtime_caps = configure_torch_runtime()
+    log_runtime_capabilities(log, runtime_caps, prefix="Training Runtime")
 
     # 2. Data Loading (Lazy)
     log.info("Stage 2: Data Loading (Generator Setup)")
@@ -56,11 +64,13 @@ def main():
     
     # 5. Model
     log.info("Stage 5: Building Model")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = select_torch_device(runtime_caps)
     log.info(f"Using device: {device}")
     if device.type == 'cuda':
         log.info(f"GPU Name: {torch.cuda.get_device_name(0)}")
         log.info(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+    elif device.type == "mps":
+        log.info("Using Apple MPS acceleration via PyTorch/Lightning.")
     
     try:
         model = get_model(config, seq_dim, static_dim)

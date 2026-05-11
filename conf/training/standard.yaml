@@ -9,6 +9,7 @@ focal_loss_alpha: 0.5
 focal_loss_gamma: 2.0
 sampling_strategy: "smote"
 mixed_precision: true
+torch_compile: false
 accumulation_steps: 4
 lr_scheduler:
   enabled: true

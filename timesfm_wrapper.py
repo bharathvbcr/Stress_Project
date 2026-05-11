@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from contextlib import nullcontext
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -68,6 +69,7 @@ TIMESFM_EMBED_DIM = 1280
 # ---------------------------------------------------------------------------
 _CACHED_BACKBONE: Optional[nn.Module] = None
 _CACHED_CHECKPOINT: Optional[str] = None
+_CACHED_DEVICE: Optional[str] = None
 
 
 def _load_backbone(
@@ -81,9 +83,12 @@ def _load_backbone(
     Download (on first call) and return the TimesFM 2.5 backbone.
     Subsequent calls with the same checkpoint reuse the cached instance.
     """
-    global _CACHED_BACKBONE, _CACHED_CHECKPOINT
+    global _CACHED_BACKBONE, _CACHED_CHECKPOINT, _CACHED_DEVICE
 
     if _CACHED_BACKBONE is not None and _CACHED_CHECKPOINT == checkpoint:
+        if _CACHED_DEVICE != str(device):
+            _CACHED_BACKBONE.model = _CACHED_BACKBONE.model.to(device)
+            _CACHED_DEVICE = str(device)
         log.debug("Reusing cached TimesFM backbone.")
         return _CACHED_BACKBONE
 
@@ -100,7 +105,8 @@ def _load_backbone(
     try:
         # 1. Instantiate the 200M parameter model class
         # Note: version 2.5 takes torch_compile in __init__
-        backbone = timesfm.TimesFM_2p5_200M_torch(torch_compile=torch.cuda.is_available())
+        use_torch_compile = device.type == "cuda"
+        backbone = timesfm.TimesFM_2p5_200M_torch(torch_compile=use_torch_compile)
 
         # 2. Download and load weights manually (Hugging Face Hub)
         # We bypass .from_pretrained() because of a signature mismatch in the 2.5 torch mixin.
@@ -108,7 +114,7 @@ def _load_backbone(
         weights_path = hf_hub_download(repo_id=checkpoint, filename="model.safetensors")
         
         log.info(f"Loading checkpoint weights into internal module from: {weights_path}")
-        backbone.model.load_checkpoint(weights_path, torch_compile=torch.cuda.is_available())
+        backbone.model.load_checkpoint(weights_path, torch_compile=use_torch_compile)
 
         # 3. Configure for inference
         backbone.compile(
@@ -124,6 +130,7 @@ def _load_backbone(
         backbone.model.eval()
         _CACHED_BACKBONE = backbone
         _CACHED_CHECKPOINT = checkpoint
+        _CACHED_DEVICE = str(device)
         log.info("TimesFM backbone loaded and aligned successfully.")
         return backbone
     except Exception as exc:
@@ -223,7 +230,8 @@ class TimesFMEmbeddingExtractor(nn.Module):
 
         def _hook_fn(module, input, output):  # noqa: ARG001
             # output shape from LayerNorm: (batch, seq, d_model) or (batch, d_model)
-            self._captured_hidden = output.detach()
+            capture = output[0] if isinstance(output, tuple) else output
+            self._captured_hidden = capture if torch.is_grad_enabled() else capture.detach()
 
         self._hook_handle = target_module.register_forward_hook(_hook_fn)
         return True
@@ -254,13 +262,31 @@ class TimesFMEmbeddingExtractor(nn.Module):
 
         self._captured_hidden = None
 
-        with torch.no_grad():
+        train_backbone = self.training and any(
+            p.requires_grad for p in self._backbone.model.parameters()
+        )
+        self._backbone.model.train(train_backbone)
+
+        with torch.set_grad_enabled(train_backbone):
             # Enable Mixed Precision for the backbone pass
             device_type = x.device.type
-            # Prefer Bfloat16 on Ampere+ GPUs (like RTX 3070 Ti)
-            dtype = torch.bfloat16 if (device_type == "cuda" and torch.cuda.is_bf16_supported()) else torch.float16
+            amp_available = bool(
+                hasattr(torch.amp, "autocast_mode")
+                and torch.amp.autocast_mode.is_autocast_available(device_type)
+            )
+            if device_type == "cuda" and torch.cuda.is_bf16_supported():
+                dtype = torch.bfloat16
+            elif device_type == "cpu":
+                dtype = torch.bfloat16
+            else:
+                dtype = torch.float16
+            amp_context = (
+                torch.amp.autocast(device_type=device_type, dtype=dtype)
+                if amp_available
+                else nullcontext()
+            )
             
-            with torch.amp.autocast(device_type=device_type, dtype=dtype):
+            with amp_context:
                 try:
                     # 1. Prepare inputs: reshape to (N, -1, patch_size)
                     patch_size = self._backbone.model.p
@@ -304,6 +330,7 @@ class TimesFMEmbeddingExtractor(nn.Module):
         if self._backbone is not None:
             for p in self._backbone.model.parameters():
                 p.requires_grad_(False)
+            self._backbone.model.eval()
             log.info("TimesFM backbone frozen (classification head only will train).")
 
     def unfreeze_backbone(self, last_n_blocks: int = 4) -> None:
@@ -321,6 +348,7 @@ class TimesFMEmbeddingExtractor(nn.Module):
         if last_n_blocks == -1:
             for p in self._backbone.model.parameters():
                 p.requires_grad_(True)
+            self._backbone.model.train()
             log.info("All TimesFM backbone parameters unfrozen for fine-tuning.")
             return
 
@@ -339,6 +367,7 @@ class TimesFMEmbeddingExtractor(nn.Module):
             # Fallback: unfreeze all if architecture unclear
             for p in self._backbone.model.parameters():
                 p.requires_grad_(True)
+            self._backbone.model.train()
             log.warning(
                 "Could not locate Transformer blocks; unfreezing all backbone params."
             )
@@ -349,6 +378,7 @@ class TimesFMEmbeddingExtractor(nn.Module):
         for block in blocks_to_unfreeze:
             for p in block.parameters():
                 p.requires_grad_(True)
+        self._backbone.model.train()
 
         n_trainable = sum(
             p.numel() for p in self._backbone.model.parameters() if p.requires_grad

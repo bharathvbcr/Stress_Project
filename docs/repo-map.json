@@ -1,11 +1,11 @@
 {
   "schema_version": "stressproject-repo-map-json/1.0",
-  "generated_at": "2026-05-07T10:58:27-05:00",
+  "generated_at": "2026-05-10T18:17:50-05:00",
   "generated_by": "repo-map-refresh.ps1",
   "repo_root": "C:\\Users\\bhara\\Downloads\\Code\\StressProject",
   "source_index": "docs/repo-map.md",
   "canonical": true,
-  "file_count": 145,
+  "file_count": 144,
   "include_filters": [
     "exclude outputs",
     "exclude scratch",
@@ -83,7 +83,6 @@
         "CLAUDE.md",
         ".claude/*",
         ".devcouncil/*",
-        ".gitignore",
         "RESUME_STAR_POINTS.md"
       ]
     },
@@ -115,7 +114,6 @@
         "timesfm/timesfm-forecasting/scripts/*",
         "timesfm/.gitattributes",
         "timesfm/.github/*",
-        "timesfm/.gitignore",
         "timesfm/LICENSE",
         "timesfm/requirements.txt"
       ]
@@ -160,9 +158,8 @@
   "directories": [
     {
       "directory": ".",
-      "file_count": 44,
+      "file_count": 43,
       "files": [
-        ".gitignore",
         "AGENTS.md",
         "api.py",
         "Baseline_Calibration_for_Stress_Response.ipynb",
@@ -233,9 +230,10 @@
     },
     {
       "directory": "conf/model",
-      "file_count": 2,
+      "file_count": 3,
       "files": [
         "conf/model/cnn_lstm.yaml",
+        "conf/model/patchtst.yaml",
         "conf/model/timesfm.yaml"
       ]
     },
@@ -261,7 +259,7 @@
     {
       "directory": "docs/assets",
       "file_count": 1,
-      "files": "docs/assets/stressproject-3d-logo.svg"
+      "files": "docs/assets/logo.png"
     },
     {
       "directory": "tests",
@@ -270,10 +268,9 @@
     },
     {
       "directory": "timesfm",
-      "file_count": 7,
+      "file_count": 6,
       "files": [
         "timesfm/.gitattributes",
-        "timesfm/.gitignore",
         "timesfm/AGENTS.md",
         "timesfm/LICENSE",
         "timesfm/pyproject.toml",
@@ -523,15 +520,6 @@
       "ownership": "Project governance / meta"
     },
     {
-      "path": ".gitignore",
-      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/.gitignore",
-      "directory": ".",
-      "name": ".gitignore",
-      "extension": ".gitignore",
-      "category": "other",
-      "ownership": "Project governance / meta"
-    },
-    {
       "path": "AGENTS.md",
       "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/AGENTS.md",
       "directory": ".",
@@ -599,6 +587,15 @@
       "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/conf/model/cnn_lstm.yaml",
       "directory": "conf/model",
       "name": "cnn_lstm.yaml",
+      "extension": ".yaml",
+      "category": "yaml",
+      "ownership": "Data ingestion / dataset construction"
+    },
+    {
+      "path": "conf/model/patchtst.yaml",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/conf/model/patchtst.yaml",
+      "directory": "conf/model",
+      "name": "patchtst.yaml",
       "extension": ".yaml",
       "category": "yaml",
       "ownership": "Data ingestion / dataset construction"
@@ -694,12 +691,12 @@
       "ownership": "Data ingestion / dataset construction"
     },
     {
-      "path": "docs/assets/stressproject-3d-logo.svg",
-      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/docs/assets/stressproject-3d-logo.svg",
+      "path": "docs/assets/logo.png",
+      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/docs/assets/logo.png",
       "directory": "docs/assets",
-      "name": "stressproject-3d-logo.svg",
-      "extension": ".svg",
-      "category": "other",
+      "name": "logo.png",
+      "extension": ".png",
+      "category": "image",
       "ownership": "Documentation"
     },
     {
@@ -979,15 +976,6 @@
       "name": "manual_publish.yml",
       "extension": ".yml",
       "category": "yaml",
-      "ownership": "TimesFM package / packaging"
-    },
-    {
-      "path": "timesfm/.gitignore",
-      "absolute_path": "C:/Users/bhara/Downloads/Code/StressProject/timesfm/.gitignore",
-      "directory": "timesfm",
-      "name": ".gitignore",
-      "extension": ".gitignore",
-      "category": "other",
       "ownership": "TimesFM package / packaging"
     },
     {

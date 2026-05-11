@@ -242,10 +242,41 @@ def extract_model_state_dict(checkpoint: Dict[str, Any]) -> Dict[str, Any]:
 def get_runtime_capabilities() -> Dict[str, Any]:
     """Collect a compact runtime capability report for logging and health checks."""
     cuda_available = torch.cuda.is_available()
-    device = torch.device("cuda" if cuda_available else "cpu")
-    device_name = torch.cuda.get_device_name(0) if cuda_available else "cpu"
+    mps_backend = getattr(torch.backends, "mps", None)
+    mps_built = bool(mps_backend.is_built()) if mps_backend and hasattr(mps_backend, "is_built") else False
+    mps_available = bool(mps_backend.is_available()) if mps_backend and hasattr(mps_backend, "is_available") else False
+    requested_device = os.environ.get("STRESS_TORCH_DEVICE", "auto").strip().lower()
+
+    if requested_device in {"cuda", "gpu"} and cuda_available:
+        device_type = "cuda"
+    elif requested_device == "mps" and mps_available:
+        device_type = "mps"
+    elif requested_device == "cpu":
+        device_type = "cpu"
+    elif cuda_available:
+        device_type = "cuda"
+    elif mps_available:
+        device_type = "mps"
+    else:
+        device_type = "cpu"
+
+    device = torch.device(device_type)
+    if device_type == "cuda":
+        device_name = torch.cuda.get_device_name(0)
+    elif device_type == "mps":
+        device_name = "Apple MPS"
+    else:
+        device_name = "cpu"
+
     bf16_supported = torch.cuda.is_bf16_supported() if cuda_available else False
-    precision = "bf16-mixed" if bf16_supported else ("16-mixed" if cuda_available else "32")
+    precision = "bf16-mixed" if device_type == "cuda" and bf16_supported else ("16-mixed" if device_type == "cuda" else "32")
+    device_count = torch.cuda.device_count() if cuda_available else (1 if device_type == "mps" else 0)
+
+    try:
+        import mlx.core as _mlx_core  # type: ignore  # noqa: F401
+        mlx_available = True
+    except ImportError:
+        mlx_available = False
 
     try:
         import tensorrt  # type: ignore  # noqa: F401
@@ -262,20 +293,35 @@ def get_runtime_capabilities() -> Dict[str, Any]:
     return {
         "torch_version": torch.__version__,
         "cuda_available": cuda_available,
+        "mps_available": mps_available,
+        "mps_built": mps_built,
+        "mlx_available": mlx_available,
         "device": str(device),
+        "device_type": device_type,
         "device_name": device_name,
-        "device_count": torch.cuda.device_count() if cuda_available else 0,
+        "device_count": device_count,
+        "accelerator": "gpu" if device_type == "cuda" else device_type,
+        "devices": "auto" if device_type == "cuda" and device_count > 1 else 1,
+        "strategy": "ddp_find_unused_parameters_false" if device_type == "cuda" and device_count > 1 else "auto",
         "bf16_supported": bf16_supported,
         "precision": precision,
+        "requested_device": requested_device,
+        "device_request_satisfied": requested_device in {"", "auto"} or requested_device == device_type or (requested_device == "gpu" and device_type == "cuda"),
         "tensorrt_available": tensorrt_available,
         "torch_tensorrt_available": torch_tensorrt_available,
     }
 
 
-def configure_torch_runtime(runtime_caps: Optional[Dict[str, Any]] = None, enable_cudnn_benchmark: bool = True) -> Dict[str, Any]:
-    """Enable safe runtime optimizations when CUDA is available."""
+def select_torch_device(runtime_caps: Optional[Dict[str, Any]] = None) -> torch.device:
+    """Return the best PyTorch device selected by get_runtime_capabilities()."""
     runtime_caps = runtime_caps or get_runtime_capabilities()
-    if runtime_caps["cuda_available"]:
+    return torch.device(runtime_caps.get("device_type") or runtime_caps.get("device", "cpu"))
+
+
+def configure_torch_runtime(runtime_caps: Optional[Dict[str, Any]] = None, enable_cudnn_benchmark: bool = True) -> Dict[str, Any]:
+    """Enable safe runtime optimizations for the selected PyTorch backend."""
+    runtime_caps = runtime_caps or get_runtime_capabilities()
+    if runtime_caps.get("device_type") == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.set_float32_matmul_precision("high")
@@ -288,16 +334,31 @@ def log_runtime_capabilities(logger: logging.Logger, runtime_caps: Optional[Dict
     """Log a one-line runtime capability summary."""
     runtime_caps = runtime_caps or get_runtime_capabilities()
     logger.info(
-        "%s: torch=%s cuda=%s device=%s device_name=%s precision=%s tensorrt=%s torch_tensorrt=%s",
+        "%s: torch=%s cuda=%s mps=%s mlx=%s device=%s device_name=%s accelerator=%s devices=%s precision=%s tensorrt=%s torch_tensorrt=%s",
         prefix,
         runtime_caps["torch_version"],
         runtime_caps["cuda_available"],
+        runtime_caps["mps_available"],
+        runtime_caps["mlx_available"],
         runtime_caps["device"],
         runtime_caps["device_name"],
+        runtime_caps["accelerator"],
+        runtime_caps["devices"],
         runtime_caps["precision"],
         runtime_caps["tensorrt_available"],
         runtime_caps["torch_tensorrt_available"],
     )
+    if runtime_caps.get("requested_device") not in {"", "auto"} and not runtime_caps.get("device_request_satisfied", True):
+        logger.warning(
+            "Requested STRESS_TORCH_DEVICE=%s but selected %s because the requested backend is unavailable.",
+            runtime_caps["requested_device"],
+            runtime_caps["device_type"],
+        )
+    if runtime_caps["mlx_available"]:
+        logger.info(
+            "%s: MLX is installed, but this training stack is PyTorch/Lightning; use MPS for Apple GPU runs unless models are ported to MLX.",
+            prefix,
+        )
     return runtime_caps
 
 # --- Loading Preprocessed Data ---

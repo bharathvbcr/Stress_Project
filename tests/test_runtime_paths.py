@@ -1,9 +1,11 @@
 import asyncio
 import json
+import os
 import tempfile
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 import torch
 from datasets import Dataset
@@ -13,6 +15,8 @@ from benchmark import run_benchmark
 from lightning_data import StressDataModule
 from lightning_module import StressLightningModule
 from models import get_model
+from timesfm_wrapper import TimesFMEmbeddingExtractor
+from utils import get_runtime_capabilities
 
 
 class DummyStaticModel(torch.nn.Module):
@@ -32,6 +36,26 @@ class DummyStaticModel(torch.nn.Module):
 
 
 class RuntimePathTests(unittest.TestCase):
+    def test_runtime_capabilities_select_mps_when_cuda_absent(self):
+        class FakeMPSBackend:
+            @staticmethod
+            def is_built():
+                return True
+
+            @staticmethod
+            def is_available():
+                return True
+
+        with mock.patch.object(torch.cuda, "is_available", return_value=False), \
+             mock.patch.object(torch.backends, "mps", FakeMPSBackend, create=True), \
+             mock.patch.dict(os.environ, {"STRESS_TORCH_DEVICE": "auto"}):
+            caps = get_runtime_capabilities()
+
+        self.assertEqual(caps["device_type"], "mps")
+        self.assertEqual(caps["accelerator"], "mps")
+        self.assertEqual(caps["devices"], 1)
+        self.assertEqual(caps["precision"], "32")
+
     def test_unpack_supports_dict_and_tuple_batches(self):
         module = StressLightningModule(
             DummyStaticModel(),
@@ -97,6 +121,64 @@ class RuntimePathTests(unittest.TestCase):
                 )
                 loss = module.training_step(batch, 0)
             self.assertTrue(torch.is_tensor(loss))
+
+    def test_get_model_patchtst_forward_smoke(self):
+        config = {
+            "model_config": {
+                "type": "PATCHTST",
+                "patch_len": 4,
+                "patch_stride": 2,
+                "patchtst_dim": 16,
+                "patchtst_heads": 4,
+                "patchtst_layers": 1,
+                "patchtst_ff_dim": 32,
+                "dropout": 0.0,
+            },
+            "training_config": {},
+        }
+        model = get_model(config, input_dim_sequence=3, input_dim_static=2)
+        logits = model(torch.randn(2, 12, 3), torch.randn(2, 2))
+        self.assertEqual(tuple(logits.shape), (2, 1))
+
+    def test_timesfm_extractor_keeps_gradients_when_backbone_is_trainable(self):
+        extractor = TimesFMEmbeddingExtractor(
+            checkpoint="dummy",
+            context_len=4,
+            horizon=1,
+            normalize_inputs=True,
+            device=torch.device("cpu"),
+        )
+        extractor.embed_dim = 4
+
+        class DummyBackboneModel(torch.nn.Module):
+            p = 1
+
+            def __init__(self, owner):
+                super().__init__()
+                self.owner = owner
+                self.linear = torch.nn.Linear(1, 4)
+
+            def forward(self, patched_x, masks):  # noqa: ARG002
+                hidden = self.linear(patched_x.float())
+                self.owner._captured_hidden = hidden
+                return hidden
+
+        class DummyBackbone:
+            def __init__(self, owner):
+                self.model = DummyBackboneModel(owner)
+
+        extractor._backbone = DummyBackbone(extractor)
+        extractor._hook_ok = True
+        extractor._attach = lambda: None
+        extractor.train()
+
+        out = extractor(torch.ones(2, 4))
+        self.assertTrue(out.requires_grad)
+
+        for param in extractor._backbone.model.parameters():
+            param.requires_grad_(False)
+        out_frozen = extractor(torch.ones(2, 4))
+        self.assertFalse(out_frozen.requires_grad)
 
     def test_api_initialization_and_prediction_cpu_smoke(self):
         with tempfile.TemporaryDirectory() as tmpdir:

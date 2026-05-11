@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
     # --- SOTA Optimization: Graph Compilation ---
     # torch.compile provides significant speedups by fusing kernels
     use_compile = safe_get(config, ['training_config', 'torch_compile'], False)
-    if use_compile and hasattr(torch, "compile") and runtime_caps["cuda_available"]:
+    if use_compile and hasattr(torch, "compile") and runtime_caps["device_type"] == "cuda":
         try:
             log.info("Compiling model (mode='reduce-overhead') for maximum throughput...")
             # 'reduce-overhead' is excellent for non-transformer classification heads
@@ -115,9 +115,9 @@ def main(cfg: DictConfig):
     precision = runtime_caps["precision"]
     
     trainer_defaults = {
-        "accelerator": "auto",
-        "devices": "auto" if runtime_caps["cuda_available"] else 1,
-        "strategy": "ddp_find_unused_parameters_false" if runtime_caps["device_count"] > 1 else "auto",
+        "accelerator": runtime_caps["accelerator"],
+        "devices": runtime_caps["devices"],
+        "strategy": runtime_caps["strategy"],
         "precision": precision,
         "accumulate_grad_batches": cfg.training.accumulation_steps,
         "gradient_clip_val": 1.0,

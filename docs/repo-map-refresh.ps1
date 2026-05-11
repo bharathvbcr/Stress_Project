@@ -28,8 +28,8 @@ function Get-Ownership($path) {
     if($path -in @("data_loader.py","data_pipeline.py","data_splitting.py","preprocessing.py","windowing.py")) { return "Data ingestion / dataset construction" }
     if($path -in @("feature_engineering.py","feature_extraction.py","signal_processing.py","utils.py","pytorch_datasets.py")) { return "Feature engineering / signal processing" }
     if($path -in @("api.py","evaluation.py","validation.py","benchmark.py","sampling.py","visualization.py","losses.py","export_trt.py")) { return "Evaluation / inference" }
-    if($path -like "timesfm/AGENTS.md" -or $path -like "timesfm/README.md" -or $path -like "timesfm/pyproject.toml" -or $path -like "timesfm/src/*" -or $path -like "timesfm/timesfm-forecasting/SKILL.md" -or $path -like "timesfm/timesfm-forecasting/references/*" -or $path -like "timesfm/timesfm-forecasting/scripts/*" -or $path -like "timesfm/.gitattributes" -or $path -like "timesfm/.gitignore" -or $path -like "timesfm/requirements.txt" -or $path -like "timesfm/.github/*" -or $path -like "timesfm/LICENSE") { return "TimesFM package / packaging" }
-    if($path -in @("AGENTS.md","CLAUDE.md",".claude/settings.local.json",".devcouncil/config.yaml",".devcouncil/state.sqlite",".gitignore","RESUME_STAR_POINTS.md")) { return "Project governance / meta" }
+    if($path -like "timesfm/AGENTS.md" -or $path -like "timesfm/README.md" -or $path -like "timesfm/pyproject.toml" -or $path -like "timesfm/src/*" -or $path -like "timesfm/timesfm-forecasting/SKILL.md" -or $path -like "timesfm/timesfm-forecasting/references/*" -or $path -like "timesfm/timesfm-forecasting/scripts/*" -or $path -like "timesfm/.gitattributes" -or $path -like "timesfm/requirements.txt" -or $path -like "timesfm/.github/*" -or $path -like "timesfm/LICENSE") { return "TimesFM package / packaging" }
+    if($path -in @("AGENTS.md","CLAUDE.md",".claude/settings.local.json",".devcouncil/config.yaml",".devcouncil/state.sqlite","RESUME_STAR_POINTS.md")) { return "Project governance / meta" }
     if($path -like "tests/*") { return "Tests" }
     if($path -like "docs/*") { return "Documentation" }
     return "Shared utilities / orchestration"
@@ -104,9 +104,9 @@ $map = [ordered]@{
         [ordered]@{ name = "inference"; files = @("api.py","evaluation.py","validation.py","benchmark.py","sampling.py","visualization.py","losses.py","export_trt.py") }
         [ordered]@{ name = "documentation"; files = @("README.md","docs/*") }
         [ordered]@{ name = "tests"; files = @("tests/*") }
-        [ordered]@{ name = "project_governance"; files = @("AGENTS.md","CLAUDE.md",".claude/*",".devcouncil/*",".gitignore","RESUME_STAR_POINTS.md") }
+        [ordered]@{ name = "project_governance"; files = @("AGENTS.md","CLAUDE.md",".claude/*",".devcouncil/*","RESUME_STAR_POINTS.md") }
         [ordered]@{ name = "shared_utilities"; files = @("config.json","cuda_python.ps1","convert_to_hf.py","dashboard.py","dvc_init.py","widget_setup.py","Baseline_Calibration_for_Stress_Response.ipynb","gitnexus-analyze.err.log","gitnexus-analyze.out.log","pytest.ini","requirements.txt") }
-        [ordered]@{ name = "timesfm"; files = @("timesfm/AGENTS.md","timesfm/README.md","timesfm/pyproject.toml","timesfm/src/timesfm/*","timesfm/timesfm-forecasting/SKILL.md","timesfm/timesfm-forecasting/references/*","timesfm/timesfm-forecasting/scripts/*","timesfm/.gitattributes","timesfm/.github/*","timesfm/.gitignore","timesfm/LICENSE","timesfm/requirements.txt") }
+        [ordered]@{ name = "timesfm"; files = @("timesfm/AGENTS.md","timesfm/README.md","timesfm/pyproject.toml","timesfm/src/timesfm/*","timesfm/timesfm-forecasting/SKILL.md","timesfm/timesfm-forecasting/references/*","timesfm/timesfm-forecasting/scripts/*","timesfm/.gitattributes","timesfm/.github/*","timesfm/LICENSE","timesfm/requirements.txt") }
         [ordered]@{ name = "legacy"; files = @("timesfm/v1/**","timesfm/timesfm-forecasting/examples/**") }
     )
     call_dependency_anchors = [ordered]@{
