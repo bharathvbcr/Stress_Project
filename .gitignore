@@ -1,0 +1,68 @@
+# Python byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python packaging & distribution
+*.egg-info/
+.eggs/
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg
+MANIFEST
+
+# Environment & Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Agent / Conductor configuration & cache directories
+.claude/
+.devcouncil/
+.conductor/
+.antigravitycli/
+.gitnexus/
+
+# IDEs & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test cache
+.pytest_cache/
+.mypy_cache/
+
+# Local model training checkpoints, weights & outputs
+outputs/
+*.pth
+*.ckpt
+*.pt
+*.onnx
+*.h5
+
+# Local logs & process IDs
+*.log
+*.err
+*.out
+*.pid
+*.bak
+
+# Temporary / scratch workspace files
+scratch/
+Directories to save intermediate and final results/
+tmp_*
