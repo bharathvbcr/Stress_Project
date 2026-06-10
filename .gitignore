@@ -75,6 +75,11 @@ agent-*.jsonl
 PLAN*.md
 RESUME*.md
 
+# AI agent instruction / skill files
+AGENTS.md
+CLAUDE.md
+SKILL.md
+
 # Temporary / scratch workspace files
 scratch/
 Directories to save intermediate and final results/
