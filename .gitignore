@@ -49,11 +49,17 @@ Thumbs.db
 
 # Local model training checkpoints, weights & outputs
 outputs/
+**/output/
 *.pth
 *.ckpt
 *.pt
 *.onnx
 *.h5
+
+# Experiment-generated plots and visualizations
+timesfm/v1/experiments/**/*.png
+timesfm/v1/experiments/**/*.pdf
+timesfm/v1/experiments/**/*.svg
 
 # Local logs & process IDs
 *.log
@@ -61,6 +67,13 @@ outputs/
 *.out
 *.pid
 *.bak
+
+# Claude Code agent transcripts, plan files, session files
+agent-*.jsonl
+*-transcript.jsonl
+*.plan
+PLAN*.md
+RESUME*.md
 
 # Temporary / scratch workspace files
 scratch/
