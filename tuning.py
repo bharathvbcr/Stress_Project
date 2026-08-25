@@ -38,17 +38,30 @@ input_dim_sequence_global  = None
 input_dim_static_global    = None
 
 
-def initialize_tuning_data():
-    """Initializes global data splits to be reused across trials."""
+def initialize_tuning_data(force: bool = False):
+    """
+    Initializes global data splits to be reused across trials.
+
+    Idempotent: a second call is a no-op unless force=True. Called lazily by
+    run_tuning() and objective() rather than at import time, so importing this
+    module never depends on preprocessed data being present on disk.
+    """
     global config
     global train_data_sampled_global, val_data_global, test_data_global
     global input_dim_sequence_global, input_dim_static_global
 
+    if train_data_sampled_global is not None and not force:
+        log.debug("Tuning data already initialised; reusing existing splits.")
+        return
+
     log.info("Loading preprocessed data for tuning...")
-    processed_data, static_features_results, _ = load_preprocessed_data(config)
-    if not processed_data:
-        raise ValueError("Failed to load processed data. Cannot run tuning.")
-    log.info("Preprocessed data loaded successfully.")
+    processed_file_paths, static_features_results, _ = load_preprocessed_data(config)
+    if not processed_file_paths:
+        raise ValueError(
+            "Failed to resolve any preprocessed subject files. Cannot run tuning. "
+            "Run the preprocessing pipeline (e.g. `python run_pipeline.py`) first."
+        )
+    log.info(f"Resolved preprocessed data for {len(processed_file_paths)} subject(s).")
 
     log.info("Preparing data splits (Windowing/Splitting) ONCE for all trials...")
     (
@@ -57,15 +70,11 @@ def initialize_tuning_data():
         test_data_global,
         input_dim_sequence_global,
         input_dim_static_global,
-    ) = get_data_splits(processed_data, static_features_results, config)
+    ) = get_data_splits(processed_file_paths, static_features_results, config)
 
     if train_data_sampled_global is None:
         raise RuntimeError("Failed to prepare global data splits.")
     log.info("Global data splits prepared.")
-
-
-# Initialise data immediately on module load
-initialize_tuning_data()
 
 
 # ==============================================================================
@@ -82,6 +91,10 @@ def objective(trial: optuna.Trial) -> float:
     global input_dim_sequence_global, input_dim_static_global
 
     log.info(f"\n--- Starting Optuna Trial {trial.number} ---")
+
+    # Data splits are prepared once and reused; no-op after the first trial. Keeps
+    # `objective` usable by a study driven directly, not only via run_tuning().
+    initialize_tuning_data()
 
     # --- Deep-copy config for this trial ---
     try:
@@ -137,6 +150,46 @@ def objective(trial: optuna.Trial) -> float:
 
     log.info(f"Trial {trial.number} Parameters: {trial.params}")
 
+    # --- MLX fast path on Apple Silicon (skips Lightning for supported models) ---
+    try:
+        from utils import configure_torch_runtime
+        from mlx_training import run_mlx_training_loaders, should_use_mlx_training
+
+        runtime_caps = configure_torch_runtime()
+        trial_model_type = trial_config["model_config"]["type"].upper()
+        if should_use_mlx_training(trial_model_type, runtime_caps):
+            train_loader, val_loader, test_loader = create_pytorch_dataloaders(
+                train_data_sampled_global,
+                val_data_global,
+                test_data_global,
+                batch_size,
+                trial_config,
+            )
+            if not train_loader or not val_loader:
+                raise optuna.TrialPruned("DataLoader creation failed.")
+            tuning_epochs = safe_get(trial_config, ["tuning_config", "epochs"], 30)
+            trial_config["training_config"]["epochs"] = tuning_epochs
+            trial_config["training_config"]["early_stopping"] = {
+                "patience": safe_get(trial_config, ["tuning_config", "patience"], 5),
+            }
+            result = run_mlx_training_loaders(
+                train_loader,
+                val_loader,
+                test_loader,
+                trial_config,
+                trial_model_type,
+                input_dim_sequence_global,
+                input_dim_static_global,
+                return_metrics=True,
+            )
+            return float(result.get("best_val_f1", 0.0))
+    except optuna.TrialPruned:
+        raise
+    except ImportError:
+        pass
+    except Exception as exc:
+        log.warning("Trial %s MLX path failed (%s); falling back to Lightning.", trial.number, exc)
+
     # --- DataLoaders ---
     try:
         train_loader, val_loader, _ = create_pytorch_dataloaders(
@@ -184,8 +237,8 @@ def objective(trial: optuna.Trial) -> float:
     try:
         import lightning as L
         from lightning_module import StressLightningModule
-        from lightning.pytorch.callbacks import EarlyStopping
         from optuna.integration import PyTorchLightningPruningCallback
+        from training import build_training_profiler, get_standard_callbacks, training_stage
     except ImportError as imp_err:
         log.error(f"Trial {trial.number}: Missing dependency: {imp_err}")
         return 0.0
@@ -195,12 +248,16 @@ def objective(trial: optuna.Trial) -> float:
     lit_model  = StressLightningModule(model, trial_config, pos_weight)
 
     # --- Callbacks ---
-    early_stop_cb = EarlyStopping(
-        monitor="val_loss",
-        patience=tuning_patience,
-        mode="min",
+    callbacks = get_standard_callbacks(
+        config=trial_config,
+        is_cuda=is_cuda,
+        enable_lr_monitor=False,
     )
-    pruning_cb = PyTorchLightningPruningCallback(trial, monitor="val_f1")
+    # Add Optuna pruning callback
+    callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_f1"))
+
+    # --- Profiler ---
+    profiler = build_training_profiler(trial_config, run_name=f"tuning_trial_{trial.number}")
 
     # --- Trainer ---
     trainer = L.Trainer(
@@ -212,7 +269,8 @@ def objective(trial: optuna.Trial) -> float:
             trial_config, ['training_config', 'accumulation_steps'], 1
         ),
         gradient_clip_val=1.0,
-        callbacks=[early_stop_cb, pruning_cb],
+        callbacks=callbacks,
+        profiler=profiler,
         enable_progress_bar=False,
         logger=False,
         enable_model_summary=False,
@@ -221,7 +279,8 @@ def objective(trial: optuna.Trial) -> float:
 
     # --- Fit ---
     try:
-        trainer.fit(lit_model, train_loader, val_loader)
+        with training_stage(log, "tuning_trial_fit", device, trial=trial.number, epochs=tuning_epochs):
+            trainer.fit(lit_model, train_loader, val_loader)
     except optuna.TrialPruned:
         raise
     except Exception as e:
@@ -242,6 +301,10 @@ def run_tuning(n_trials: int = 50):
     global config
     study_name  = safe_get(config, ['tuning_config', 'study_name'], "stress_detection_study")
     results_dir = safe_get(config, ['save_paths', 'results'], './outputs/results')
+
+    # Load data and build the splits before any trial runs, so a missing-data
+    # failure surfaces here rather than inside the first trial.
+    initialize_tuning_data()
 
     log.info(f"Starting Optuna study '{study_name}' for {n_trials} trials.")
     pruner = optuna.pruners.MedianPruner(

@@ -1,5 +1,7 @@
 # data_pipeline.py (Orchestrates windowing, splitting, sampling, and DataLoader creation)
 
+import os
+import json
 import numpy as np
 import pandas as pd
 import torch
@@ -143,6 +145,110 @@ def _calculate_input_dims(
 # == Main Data Pipeline Function ==
 # ==============================================================================
 
+def _normalize_sequence_enabled(config: Dict[str, Any]) -> bool:
+    """Resolve the processing.normalize_sequence_features flag (default True)."""
+    flag = safe_get(config, ['processing', 'normalize_sequence_features'], True)
+    if isinstance(flag, str):
+        return flag.strip().lower() not in {'0', 'false', 'no', 'off', 'none', ''}
+    return bool(flag)
+
+
+def _compute_channel_stats(seq_list: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Per-channel mean/std over all timesteps of the given windows, computed in a
+    streaming fashion to avoid stacking the whole training set in memory.
+
+    Args:
+        seq_list: list of (window_length, num_features) arrays.
+
+    Returns:
+        (mean, std) each shaped (num_features,), float32. Constant channels get
+        std=1.0 to avoid divide-by-zero.
+    """
+    n_features = int(np.asarray(seq_list[0]).shape[1])
+    ch_sum = np.zeros(n_features, dtype=np.float64)
+    ch_sumsq = np.zeros(n_features, dtype=np.float64)
+    count = 0
+    for window in seq_list:
+        w = np.asarray(window, dtype=np.float64)  # (L, F)
+        ch_sum += w.sum(axis=0)
+        ch_sumsq += (w ** 2).sum(axis=0)
+        count += w.shape[0]
+    if count == 0:
+        return np.zeros(n_features, dtype=np.float32), np.ones(n_features, dtype=np.float32)
+    mean = ch_sum / count
+    var = np.maximum(ch_sumsq / count - mean ** 2, 0.0)
+    std = np.sqrt(var)
+    std[std < 1e-6] = 1.0  # constant channel → leave values centered, scale by 1
+    return mean.astype(np.float32), std.astype(np.float32)
+
+
+def _apply_channel_norm(
+    seq_list: List[np.ndarray], mean: np.ndarray, std: np.ndarray
+) -> List[np.ndarray]:
+    """Standardize each window per channel: (x - mean) / std."""
+    return [((np.asarray(w, dtype=np.float32) - mean) / std).astype(np.float32) for w in seq_list]
+
+
+def _persist_norm_stats(
+    mean: np.ndarray, std: np.ndarray, feature_order: Optional[List[str]], config: Dict[str, Any]
+) -> None:
+    """Persist normalization stats so inference can reproduce the same scaling."""
+    out_dir = safe_get(config, ['save_paths', 'processed_data'], './outputs/processed_data')
+    try:
+        out_dir = os.path.abspath(out_dir)
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, 'sequence_norm_stats.json')
+        with open(path, 'w', encoding='utf-8') as fh:
+            json.dump(
+                {'mean': mean.tolist(), 'std': std.tolist(), 'feature_order': feature_order},
+                fh,
+                indent=2,
+            )
+        log.info("Saved sequence normalization stats to %s", path)
+    except Exception as exc:
+        log.warning("Could not persist normalization stats (non-fatal): %s", exc)
+
+
+def _normalize_splits(
+    train_data: Tuple[List, ...],
+    val_data: Tuple[List, ...],
+    test_data: Tuple[List, ...],
+    feature_order: Optional[List[str]],
+    config: Dict[str, Any],
+) -> Tuple[Tuple[List, ...], Tuple[List, ...], Tuple[List, ...]]:
+    """
+    Apply per-channel standardization using stats fit ONLY on the training split,
+    then applied to train/val/test. No-op (returns inputs unchanged) if disabled,
+    if training sequences are empty, or on any error (logged, non-fatal).
+    """
+    if not _normalize_sequence_enabled(config):
+        return train_data, val_data, test_data
+    train_seqs = train_data[0]
+    if not train_seqs:
+        log.warning("Sequence normalization skipped: training sequences are empty.")
+        return train_data, val_data, test_data
+    try:
+        mean, std = _compute_channel_stats(train_seqs)
+        log.info(
+            "Sequence normalization (train-only stats) applied across %d channels.",
+            len(mean),
+        )
+        train_data = (_apply_channel_norm(train_data[0], mean, std), *train_data[1:])
+        if val_data[0]:
+            val_data = (_apply_channel_norm(val_data[0], mean, std), *val_data[1:])
+        if test_data[0]:
+            test_data = (_apply_channel_norm(test_data[0], mean, std), *test_data[1:])
+        _persist_norm_stats(mean, std, feature_order, config)
+    except Exception as exc:
+        log.error(
+            "Sequence normalization failed (non-fatal; continuing unnormalized): %s",
+            exc,
+            exc_info=True,
+        )
+    return train_data, val_data, test_data
+
+
 def get_data_splits(
     processed_data_paths: Dict[Union[int, str], str], # CHANGED: Dict of paths
     static_features_results: Dict[Union[int, str], Optional[pd.DataFrame]],
@@ -203,6 +309,13 @@ def get_data_splits(
     except Exception as e:
         log.error(f"get_data_splits: Unexpected error during data splitting: {e}", exc_info=True)
         return None, None, None, input_dim_sequence, input_dim_static
+
+    # --- Step 3.5: Per-channel normalization (stats fit on TRAIN split only) ---
+    # Done before sampling so synthetic/duplicated samples don't skew the stats,
+    # and applied to all three splits with the same train-derived mean/std.
+    train_data, val_data, test_data = _normalize_splits(
+        train_data, val_data, test_data, feature_order_list, config
+    )
 
     # --- Step 4: Apply Sampling (to Training Data Only) ---
     try:

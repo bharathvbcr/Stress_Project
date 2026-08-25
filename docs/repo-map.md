@@ -39,6 +39,7 @@ flowchart TD
   ROOT --> MODELING["Modeling + Lightning"]
   ROOT --> UTIL["Utilities"]
 
+  ROOT --> MLX["Apple MLX Backend"]
   PIPE --> main["main.py"]
   PIPE --> run_pipeline["run_pipeline.py"]
   PIPE --> run_pipeline_timesfm["run_pipeline_timesfm.py"]
@@ -76,6 +77,16 @@ flowchart TD
   UTIL --> export["export_trt.py"]
   UTIL --> widget_setup["widget_setup.py"]
 
+  MLX --> mlx_backend["mlx_backend.py"]
+  MLX --> mlx_models["mlx_models.py"]
+  MLX --> mlx_training["mlx_training.py"]
+  MLX --> mlx_convert["mlx_convert.py"]
+  MLX --> mlx_hybrid["mlx_hybrid.py"]
+  MLX --> mlx_timesfm["mlx_timesfm_training.py"]
+  MLX --> mlx_benchmark["mlx_benchmark.py"]
+  MLX --> convert_mlx["convert_checkpoint_to_mlx.py"]
+  MLX --> convert_all_mlx["convert_all_checkpoints_to_mlx.py"]
+
   T --> TSRC["timesfm/src/timesfm"]
   T --> V1["timesfm/v1"]
   T --> SK["timesfm/timesfm-forecasting"]
@@ -98,9 +109,12 @@ flowchart TD
 - `api.py`  
 - `Baseline_Calibration_for_Stress_Response.ipynb`  
 - `benchmark.py`  
+- `callbacks.py`  
 - `CLAUDE.md`  
 - `config.json`  
 - `convert_to_hf.py`  
+- `convert_checkpoint_to_mlx.py`  
+- `convert_all_checkpoints_to_mlx.py`  
 - `cuda_python.ps1`  
 - `dashboard.py`  
 - `data_loader.py`  
@@ -108,6 +122,7 @@ flowchart TD
 - `data_splitting.py`  
 - `dvc_init.py`  
 - `docs/repo-map.md`  
+- `evaluate_checkpoint.py`  
 - `evaluation.py`  
 - `export_trt.py`  
 - `feature_engineering.py`  
@@ -118,23 +133,38 @@ flowchart TD
 - `lightning_module.py`  
 - `losses.py`  
 - `main.py`  
+- `mlx_backend.py`  
+- `mlx_benchmark.py`  
+- `mlx_convert.py`  
+- `mlx_hybrid.py`  
+- `mlx_models.py`  
+- `mlx_timesfm_training.py`  
+- `mlx_training.py`  
 - `models.py`  
+- `performance_guard.py`  
 - `preprocessing.py`  
 - `pytest.ini`  
 - `pytorch_datasets.py`  
+- `quantize_cpu.py`  
 - `README.md`  
 - `requirements.txt`  
+- `requirements-cuda.txt`  
+- `requirements-apple.txt`  
 - `RESUME_STAR_POINTS.md`  
 - `run_lightning.py`  
 - `run_pipeline.py`  
 - `run_pipeline_timesfm.py`  
 - `sampling.py`  
 - `signal_processing.py`  
+- `timesfm_lora.py`  
 - `timesfm_wrapper.py`  
 - `training.py`  
 - `tuning.py`  
 - `utils.py`  
 - `validation.py`  
+- `verify_cuda_python.py`  
+- `verify_cuda_python_ipc.py`  
+- `verify_deployment.ps1`  
 - `visualization.py`  
 - `widget_setup.py`  
 - `windowing.py`  
@@ -150,6 +180,13 @@ flowchart TD
 
 ### `tests/`
 - `tests/test_runtime_paths.py`  
+- `tests/test_mlx_models.py`  
+- `tests/test_mlx_convert.py`  
+- `tests/test_mlx_timesfm_training.py`  
+- `tests/test_timesfm_lora_inference.py`  
+
+### `.github/workflows/`
+- `.github/workflows/mlx-smoke.yml`  
 
 ### `docs/`
 - `docs/repo-map.md`  
@@ -282,9 +319,11 @@ flowchart TD
 - **Feature engineering / signal processing**
   - `feature_engineering.py`, `feature_extraction.py`, `signal_processing.py`, `utils.py`, `pytorch_datasets.py`
 - **Modeling / training**
-  - `main.py`, `models.py`, `run_pipeline.py`, `run_pipeline_timesfm.py`, `run_lightning.py`, `training.py`, `tuning.py`, `timesfm_wrapper.py`, `lightning_data.py`, `lightning_module.py`
+  - `main.py`, `models.py`, `run_pipeline.py`, `run_pipeline_timesfm.py`, `run_lightning.py`, `training.py`, `callbacks.py`, `tuning.py`, `timesfm_wrapper.py`, `lightning_data.py`, `lightning_module.py`
+- **Apple MLX backend (Apple Silicon)**
+  - `mlx_backend.py`, `mlx_models.py`, `mlx_training.py`, `mlx_convert.py`, `mlx_hybrid.py`, `mlx_timesfm_training.py`, `mlx_benchmark.py`, `convert_checkpoint_to_mlx.py`, `convert_all_checkpoints_to_mlx.py`, `timesfm_lora.py`, `requirements-apple.txt`
 - **Evaluation / inference / diagnostics**
-  - `api.py`, `evaluation.py`, `validation.py`, `benchmark.py`, `sampling.py`, `visualization.py`, `losses.py`, `export_trt.py`
+  - `api.py`, `evaluate_checkpoint.py`, `evaluation.py`, `validation.py`, `benchmark.py`, `sampling.py`, `visualization.py`, `losses.py`, `export_trt.py`, `performance_guard.py`, `quantize_cpu.py`
 - **Documentation**
   - `README.md`, `docs/**`
 - **Tests**
@@ -292,7 +331,7 @@ flowchart TD
 - **Project governance / meta**
   - `AGENTS.md`, `CLAUDE.md`, `.claude/**`, `.devcouncil/**`, `RESUME_STAR_POINTS.md`
 - **Shared utilities / orchestration**
-  - `config.json`, `cuda_python.ps1`, `convert_to_hf.py`, `dashboard.py`, `dvc_init.py`, `widget_setup.py`, `Baseline_Calibration_for_Stress_Response.ipynb`, `gitnexus-analyze.err.log`, `gitnexus-analyze.out.log`, `pytest.ini`, `requirements.txt`
+  - `config.json`, `cuda_python.ps1`, `convert_to_hf.py`, `dashboard.py`, `dvc_init.py`, `widget_setup.py`, `Baseline_Calibration_for_Stress_Response.ipynb`, `gitnexus-analyze.err.log`, `gitnexus-analyze.out.log`, `pytest.ini`, `requirements.txt`, `requirements-cuda.txt`, `verify_cuda_python.py`, `verify_cuda_python_ipc.py`, `verify_deployment.ps1`
 - **TimesFM package / packaging**
   - `timesfm/AGENTS.md`, `timesfm/README.md`, `timesfm/pyproject.toml`, `timesfm/src/timesfm/**`, `timesfm/timesfm-forecasting/SKILL.md`, `timesfm/timesfm-forecasting/references/**`, `timesfm/timesfm-forecasting/scripts/**`, `timesfm/.gitattributes`, `timesfm/.github/**`, `timesfm/LICENSE`, `timesfm/requirements.txt`
 - **Legacy / archive**

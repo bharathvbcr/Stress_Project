@@ -5,13 +5,29 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import logging
 import os
-from typing import Dict, Any, Optional, Tuple
+import time
+from contextlib import contextmanager
+from typing import Dict, Any, Optional, Tuple, List
 import numpy as np
 import collections
 
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.profilers import AdvancedProfiler, PyTorchProfiler
 from lightning.pytorch.loggers import CSVLogger
+
+from callbacks import (
+    HistoryCallback,
+    BatchTimeLoggingCallback,
+    GradientNormLoggingCallback,
+    NumericalStabilityCallback,
+    SystemDiagnosticsCallback,
+    ModelComplexityCallback,
+    log_gpu_diagnostics as _callback_log_gpu_diagnostics,
+    _maybe_cuda_synchronize,
+    _cuda_memory_snapshot,
+    _format_cuda_snapshot,
+)
 
 from losses import FocalLoss
 from utils import safe_get
@@ -115,13 +131,19 @@ def _calculate_pos_weight(train_loader: DataLoader, device: torch.device) -> Opt
         else:
             log.info("Dataset labels not directly accessible. Iterating loader (Slower)...")
             for batch_data in train_loader:
-                if len(batch_data) != 5:
+                # Support both Arrow dict batches and the legacy 5-tuple loader output.
+                if isinstance(batch_data, dict):
+                    labels = batch_data.get("label")
+                elif isinstance(batch_data, (list, tuple)) and len(batch_data) >= 3:
+                    labels = batch_data[2]
+                else:
+                    labels = None
+                if labels is None:
                     log.warning(
-                        "Train loader batch did not contain 5 items. "
-                        "Skipping weight calculation for this batch."
+                        "Train loader batch had no recognizable labels "
+                        "(expected dict['label'] or tuple index 2). Skipping batch."
                     )
                     continue
-                _, _, labels, _, _ = batch_data
                 batch_counts = collections.Counter(labels.cpu().numpy().astype(int))
                 train_label_counts.update(batch_counts)
                 num_train_samples += len(labels)
@@ -254,34 +276,247 @@ def _get_optimizer(model: nn.Module, config: Dict[str, Any], device: torch.devic
 
 
 # ==============================================================================
-# == History Callback ==
+# == Callbacks & Utilities ==
 # ==============================================================================
 
-class _HistoryCallback(L.Callback):
-    """Accumulates per-epoch metrics into a history dict compatible with the legacy API."""
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "disabled", "none"}:
+            return False
+    return default
 
-    def __init__(self):
-        self.history = {
-            "train_loss":    [],
-            "val_loss":      [],
-            "val_accuracy":  [],
-            "val_f1":        [],
-        }
 
-    def _scalar(self, v):
-        if v is None:
-            return float("nan")
-        return v.item() if hasattr(v, "item") else float(v)
+def _get_diagnostics_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    diagnostics_cfg = safe_get(config, ["training_config", "diagnostics"], None)
+    if not isinstance(diagnostics_cfg, dict):
+        diagnostics_cfg = safe_get(config, ["diagnostics"], None)
+    return diagnostics_cfg if isinstance(diagnostics_cfg, dict) else {}
 
-    def on_train_epoch_end(self, trainer, pl_module):
-        m = trainer.callback_metrics
-        self.history["train_loss"].append(self._scalar(m.get("train_loss")))
 
-    def on_validation_epoch_end(self, trainer, pl_module):
-        m = trainer.callback_metrics
-        self.history["val_loss"].append(self._scalar(m.get("val_loss")))
-        self.history["val_accuracy"].append(self._scalar(m.get("val_acc")))
-        self.history["val_f1"].append(self._scalar(m.get("val_f1")))
+def _config_value(config: Dict[str, Any], paths: List[List[str]], default: Any = None) -> Any:
+    for path in paths:
+        value = safe_get(config, path, None)
+        if value is not None:
+            return value
+    return default
+
+
+def _as_positive_int(value: Any, default: int) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_nonnegative_int(value: Any, default: int) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_len(value: Any) -> str:
+    try:
+        return str(len(value))
+    except (TypeError, AttributeError):
+        return "unknown"
+
+
+def _log_trainer_metrics(trainer: Any, metrics: Dict[str, float], step: Optional[int] = None) -> None:
+    loggers = getattr(trainer, "loggers", None)
+    if not loggers:
+        logger_obj = getattr(trainer, "logger", None)
+        loggers = [logger_obj] if logger_obj else []
+    for logger_obj in loggers:
+        if logger_obj is None:
+            continue
+        try:
+            logger_obj.log_metrics(metrics, step=step)
+        except Exception as exc:
+            log.debug("Trainer metric logging failed for %s: %s", metrics.keys(), exc)
+
+
+def log_gpu_diagnostics(log_obj: logging.Logger, device: torch.device) -> None:
+    if not isinstance(device, torch.device):
+        device = torch.device(device)
+    if device.type != "cuda":
+        log_obj.info("CUDA is not active for this run; skipping GPU diagnostics.")
+        return
+    _callback_log_gpu_diagnostics(log_obj, device)
+
+
+@contextmanager
+def training_stage(
+    log_obj: logging.Logger,
+    stage_name: str,
+    device: Optional[torch.device] = None,
+    **context: Any,
+):
+    start = time.perf_counter()
+    context_text = " ".join(f"{key}={value}" for key, value in context.items() if value is not None)
+    context_suffix = f" {context_text}" if context_text else ""
+    start_snapshot = _cuda_memory_snapshot(device) if device is not None else None
+    log_obj.info(
+        "[Training Stage] START %s%s%s",
+        stage_name,
+        context_suffix,
+        _format_cuda_snapshot(start_snapshot),
+    )
+    try:
+        yield
+    except Exception:
+        elapsed = time.perf_counter() - start
+        end_snapshot = _cuda_memory_snapshot(device) if device is not None else None
+        log_obj.exception(
+            "[Training Stage] FAILED %s elapsed=%.2fs%s",
+            stage_name,
+            elapsed,
+            _format_cuda_snapshot(end_snapshot),
+        )
+        raise
+    else:
+        elapsed = time.perf_counter() - start
+        end_snapshot = _cuda_memory_snapshot(device) if device is not None else None
+        log_obj.info(
+            "[Training Stage] END %s elapsed=%.2fs%s",
+            stage_name,
+            elapsed,
+            _format_cuda_snapshot(end_snapshot),
+        )
+
+
+def build_training_profiler(config: Dict[str, Any], run_name: str = "training"):
+    profiler_cfg = _config_value(
+        config,
+        [
+            ["training_config", "diagnostics", "profiler"],
+            ["training_config", "diagnostics", "profile_training"],
+            ["diagnostics", "profiler"],
+            ["diagnostics", "profile_training"],
+            ["training_config", "profile_training"],
+            ["training_config", "profiler"],
+            ["profile_training"],
+            ["profiler"],
+        ],
+        False,
+    )
+    env_enabled = _coerce_bool(os.environ.get("STRESS_PROFILE_TRAINING"), False)
+    env_type = os.environ.get("STRESS_TRAINING_PROFILER")
+    env_dir = os.environ.get("STRESS_PROFILER_DIR")
+
+    if isinstance(profiler_cfg, dict):
+        enabled = _coerce_bool(profiler_cfg.get("enabled"), False) or env_enabled
+        profiler_type = str(env_type or profiler_cfg.get("type", "pytorch")).lower()
+        dirpath = env_dir or profiler_cfg.get("dirpath") or "outputs/profiler_results"
+    elif isinstance(profiler_cfg, str):
+        profiler_type = str(env_type or profiler_cfg).lower()
+        enabled = profiler_type not in {"0", "false", "no", "n", "off", "disabled", "none"} or env_enabled
+        if profiler_type in {"1", "true", "yes", "y", "on", "enabled"}:
+            profiler_type = "pytorch"
+        dirpath = env_dir or "outputs/profiler_results"
+    else:
+        enabled = _coerce_bool(profiler_cfg, False) or env_enabled
+        profiler_type = str(env_type or "pytorch").lower()
+        dirpath = env_dir or "outputs/profiler_results"
+
+    if not enabled:
+        return None
+
+    try:
+        os.makedirs(dirpath, exist_ok=True)
+        filename = f"{run_name}_{profiler_type}_profiler"
+        if profiler_type in {"advanced", "lightning"}:
+            return AdvancedProfiler(dirpath=dirpath, filename=filename)
+        return PyTorchProfiler(dirpath=dirpath, filename=filename)
+    except Exception as exc:
+        log.warning("Could not initialize training profiler '%s': %s", profiler_type, exc)
+        return None
+
+
+def get_standard_callbacks(
+    config: Dict[str, Any],
+    output_dir: Optional[str] = None,
+    is_cuda: bool = False,
+    enable_lr_monitor: bool = True,
+    monitor: str = "val_loss",
+) -> List[L.Callback]:
+    """
+    Builds a standard list of callbacks including performance monitoring.
+
+    Args:
+        monitor: Metric to drive EarlyStopping and ModelCheckpoint. Defaults to
+                 "val_loss"; callers without a validation loader should pass
+                 "train_loss" to avoid monitoring a metric that is never logged.
+    """
+    patience = _config_value(
+        config,
+        [["early_stopping", "patience"], ["training_config", "early_stopping", "patience"]],
+        10,
+    )
+    min_delta = _config_value(
+        config,
+        [["early_stopping", "min_delta"], ["training_config", "early_stopping", "min_delta"]],
+        0.001,
+    )
+    diagnostics_cfg = _get_diagnostics_config(config)
+    diagnostics_enabled = _coerce_bool(diagnostics_cfg.get("enabled", True), True)
+    step_log_interval = _as_positive_int(diagnostics_cfg.get("log_every_n_steps", 50), 50)
+    cuda_sync_interval = _as_nonnegative_int(diagnostics_cfg.get("cuda_sync_interval", 0), 0)
+    memory_log_interval = _as_positive_int(diagnostics_cfg.get("memory_log_interval", 100), 100)
+    epoch_memory_summary = _coerce_bool(diagnostics_cfg.get("epoch_memory_summary", True), True)
+    weight_stats = _coerce_bool(diagnostics_cfg.get("weight_stats", True), True)
+    stability_check_interval = _as_positive_int(diagnostics_cfg.get("stability_check_interval", 50), 50)
+
+    callbacks = [
+        EarlyStopping(
+            monitor=monitor,
+            patience=patience,
+            min_delta=min_delta,
+            mode="min",
+        ),
+    ]
+
+    if enable_lr_monitor:
+        callbacks.append(LearningRateMonitor(logging_interval="step"))
+
+    if diagnostics_enabled:
+        callbacks.extend([
+            BatchTimeLoggingCallback(
+                log_interval=step_log_interval,
+                cuda_sync_interval=cuda_sync_interval if is_cuda else 0,
+                memory_log_interval=memory_log_interval,
+                epoch_memory_summary=epoch_memory_summary,
+            ),
+            GradientNormLoggingCallback(
+                log_interval=step_log_interval,
+                weight_stats=weight_stats,
+            ),
+            NumericalStabilityCallback(check_every_n_steps=stability_check_interval),
+            ModelComplexityCallback(),
+            SystemDiagnosticsCallback(),
+        ])
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        callbacks.append(ModelCheckpoint(
+            dirpath=output_dir,
+            filename="best_model-{epoch:02d}-{" + monitor + ":.4f}",
+            monitor=monitor,
+            save_top_k=1,
+            mode="min",
+            save_weights_only=True,
+        ))
+
+    return callbacks
 
 
 # ==============================================================================
@@ -295,22 +530,24 @@ def train_model(
     config: Dict[str, Any],
     device: torch.device,
     output_dir: Optional[str],
-) -> Tuple[Optional[Dict], Optional[Dict]]:
+) -> Tuple[Optional[Dict], Optional[List[Dict]]]:
     """
     Trains the model using PyTorch Lightning.
 
     Args:
         model:        The PyTorch model to train (already instantiated).
         train_loader: DataLoader for the training set.
-        val_loader:   DataLoader for the validation set (optional).
+        val_loader:   DataLoader for the validation set (optional). When None,
+                      early stopping / checkpointing / the LR scheduler fall back
+                      to monitoring train_loss instead of val_loss.
         config:       Configuration dictionary.
         device:       The device (CPU or CUDA) to train on.
         output_dir:   Directory to save the best model checkpoint (optional).
 
     Returns:
         Tuple:
-            - best_state_dict (Optional[Dict]): State dict of the best model by val_loss.
-            - history (Optional[Dict]):         Per-epoch metrics dict.
+            - best_state_dict (Optional[Dict]):    State dict of the best model.
+            - history (Optional[List[Dict]]):      List of per-epoch metrics dicts.
     """
     log.info("--- Starting Model Training (Lightning) ---")
 
@@ -319,8 +556,6 @@ def train_model(
 
     # --- Read config values ---
     epochs     = safe_get(config, ['training_config', 'epochs'], 50)
-    patience   = safe_get(config, ['early_stopping', 'patience'], 10)
-    min_delta  = safe_get(config, ['early_stopping', 'min_delta'], 0.001)
     accum      = safe_get(config, ['training_config', 'accumulation_steps'], 1)
     use_amp    = safe_get(config, ['training_config', 'mixed_precision'], True)
     is_cuda    = (device.type == "cuda")
@@ -338,99 +573,146 @@ def train_model(
             precision = "16-mixed"
     else:
         precision = "32"
-    log.info(f"Trainer precision: {precision}")
+    log.info(
+        "Training config: epochs=%s accumulation_steps=%s mixed_precision=%s precision=%s train_batches=%s val_batches=%s",
+        epochs,
+        accum,
+        use_amp,
+        precision,
+        _safe_len(train_loader),
+        _safe_len(val_loader),
+    )
+
+    # --- Sync Point Debugging ---
+    debug_cuda_sync = _config_value(config, [["debug_cuda_sync"], ["training_config", "debug_cuda_sync"]], False)
+    if is_cuda and _coerce_bool(debug_cuda_sync, False):
+        try:
+            log.info("CUDA sync debugging enabled. PyTorch will warn on CPU-GPU sync points.")
+            torch.cuda.set_sync_debug_mode(1)
+        except Exception as sync_debug_err:
+            log.warning("Could not enable CUDA sync debugging: %s", sync_debug_err)
+
+    # --- GPU Diagnostics ---
+    with training_stage(log, "gpu_diagnostics", device):
+        log_gpu_diagnostics(log, device)
+
+    # Determine which metric to monitor — val_loss requires a validation loader.
+    has_validation = val_loader is not None
+    monitor_metric = "val_loss" if has_validation else "train_loss"
+    if not has_validation:
+        log.warning(
+            "No validation loader provided. Early stopping, checkpointing, and the "
+            "LR scheduler will monitor 'train_loss' instead of 'val_loss'."
+        )
 
     # --- Build Lightning module ---
-    pos_weight = _calculate_pos_weight(train_loader, device)
-    lit_model  = StressLightningModule(model, config, pos_weight)
+    with training_stage(log, "build_lightning_module", device):
+        # pos_weight only feeds BCE; focal loss ignores it, so skip the (potentially
+        # full-epoch) computation when focal loss is configured.
+        loss_function_type = safe_get(config, ['training_config', 'loss_function'], 'bce').lower()
+        if loss_function_type == 'focal':
+            pos_weight = None
+            log.info("Focal loss configured; skipping pos_weight computation.")
+        else:
+            pos_weight = _calculate_pos_weight(train_loader, device)
+        lit_model = StressLightningModule(model, config, pos_weight)
+        # Tell the module which metric the LR scheduler should monitor.
+        lit_model._monitor_metric = monitor_metric
 
-    # Optional: torch.compile for graph fusion (PyTorch 2.0+, skip on CPU or non-CUDA)
+    # Optional: torch.compile for graph fusion (PyTorch 2.0+, skip on CPU or non-CUDA).
+    # Never compile TimesFM: torch.compile strips forward hooks used for embeddings.
     use_compile = safe_get(config, ['training_config', 'torch_compile'], False)
+    model_type = safe_get(config, ['model_config', 'type'], '').upper()
+    if use_compile and model_type == "TIMESFM":
+        log.warning(
+            "Ignoring training.torch_compile for TIMESFM: compilation breaks "
+            "forward-hook embedding extraction (flat predictions)."
+        )
+        use_compile = False
     if use_compile and is_cuda:
-        try:
-            lit_model.model = torch.compile(lit_model.model)
-            log.info("torch.compile applied to model (graph fusion enabled).")
-        except Exception as compile_err:
-            log.warning(f"torch.compile failed (non-fatal): {compile_err}")
+        with training_stage(log, "torch_compile", device):
+            try:
+                lit_model.model = torch.compile(lit_model.model)
+                log.info("torch.compile applied to model (graph fusion enabled).")
+            except Exception as compile_err:
+                log.warning("torch.compile failed (non-fatal): %s", compile_err)
 
     # --- Callbacks ---
-    history_cb = _HistoryCallback()
-    callbacks  = [
-        EarlyStopping(
-            monitor="val_loss",
-            patience=patience,
-            min_delta=min_delta,
-            mode="min",
-        ),
-        LearningRateMonitor(logging_interval="epoch"),
-        history_cb,
-    ]
+    with training_stage(log, "build_callbacks", device):
+        history_cb = HistoryCallback()
+        callbacks = get_standard_callbacks(
+            config=config,
+            output_dir=output_dir,
+            is_cuda=is_cuda,
+            monitor=monitor_metric,
+        )
+        callbacks.append(history_cb)
 
     # Estimate steps per epoch for log_every_n_steps (avoid Lightning's default=50 missing small datasets)
     steps_per_epoch = max(1, len(train_loader) // accum)
     log_every_n_steps = max(1, min(50, steps_per_epoch))
 
-    ckpt_callback = None
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-        ckpt_callback = ModelCheckpoint(
-            dirpath=output_dir,
-            filename="best_model-{epoch:02d}-{val_loss:.4f}",
-            monitor="val_loss",
-            save_top_k=1,
-            mode="min",
-            save_weights_only=True,
-        )
-        callbacks.append(ckpt_callback)
-
     # --- Logger ---
-    csv_logger = CSVLogger(
-        save_dir=output_dir if output_dir else "outputs/logs",
-        name="stress_training",
-    )
+    with training_stage(log, "build_logger_profiler", device):
+        csv_logger = CSVLogger(
+            save_dir=output_dir if output_dir else "outputs/logs",
+            name="stress_training",
+        )
+        profiler = build_training_profiler(config, run_name="train_model")
 
     # --- Trainer ---
-    trainer = L.Trainer(
-        max_epochs=epochs,
-        accelerator="gpu" if is_cuda else ("mps" if is_mps else "cpu"),
-        devices=1,
-        precision=precision,
-        accumulate_grad_batches=accum,
-        gradient_clip_val=1.0,
-        callbacks=callbacks,
-        logger=csv_logger,
-        num_sanity_val_steps=0,
-        enable_model_summary=True,
-        enable_progress_bar=True,
-        deterministic=False,
-        enable_checkpointing=(output_dir is not None),
-        log_every_n_steps=log_every_n_steps,
-    )
+    with training_stage(log, "initialize_trainer", device):
+        enable_progress_bar = _coerce_bool(
+            _config_value(config, [["training_config", "enable_progress_bar"], ["enable_progress_bar"]], False),
+            False,
+        )
+        trainer = L.Trainer(
+            max_epochs=epochs,
+            accelerator="gpu" if is_cuda else ("mps" if is_mps else "cpu"),
+            devices=1,
+            precision=precision,
+            accumulate_grad_batches=accum,
+            gradient_clip_val=1.0,
+            callbacks=callbacks,
+            logger=csv_logger,
+            profiler=profiler,
+            num_sanity_val_steps=0,
+            enable_model_summary=True,
+            enable_progress_bar=enable_progress_bar,
+            deterministic=False,
+            enable_checkpointing=(output_dir is not None),
+            log_every_n_steps=log_every_n_steps,
+        )
 
     # --- Fit ---
-    trainer.fit(
-        lit_model,
-        train_dataloaders=train_loader,
-        val_dataloaders=val_loader,
-    )
+    with training_stage(log, "trainer_fit", device, epochs=epochs, steps_per_epoch=steps_per_epoch):
+        trainer.fit(
+            lit_model,
+            train_dataloaders=train_loader,
+            val_dataloaders=val_loader,
+        )
 
     history = history_cb.history
 
     # --- Load best checkpoint weights (not last-epoch weights) ---
     best_state_dict = None
-    if ckpt_callback is not None and ckpt_callback.best_model_path:
-        try:
-            ckpt = torch.load(ckpt_callback.best_model_path, map_location=device, weights_only=True)
-            # ModelCheckpoint with save_weights_only=True stores under "state_dict" key
-            raw = ckpt.get("state_dict", ckpt)
-            # Strip Lightning "model." prefix if present
-            best_state_dict = {
-                k[len("model."):] if k.startswith("model.") else k: v
-                for k, v in raw.items()
-            }
-            log.info(f"Loaded best checkpoint from: {ckpt_callback.best_model_path}")
-        except Exception as ckpt_err:
-            log.warning(f"Could not load best checkpoint (non-fatal): {ckpt_err}. Returning last-epoch weights.")
+    with training_stage(log, "load_best_checkpoint", device):
+        ckpt_callback = next((c for c in callbacks if isinstance(c, ModelCheckpoint)), None)
+        if ckpt_callback is not None and ckpt_callback.best_model_path:
+            try:
+                ckpt = torch.load(ckpt_callback.best_model_path, map_location=device, weights_only=True)
+                raw = ckpt.get("state_dict", ckpt)
+                # Keep only the wrapped model's weights. Dropping non-"model." keys
+                # (e.g. pos_weight_buffer, criterion.pos_weight) avoids strict-load
+                # failures when this dict is loaded onto the bare model downstream.
+                best_state_dict = {
+                    k[len("model."):]: v
+                    for k, v in raw.items()
+                    if k.startswith("model.")
+                } or lit_model.model.state_dict()
+                log.info("Loaded best checkpoint from: %s", ckpt_callback.best_model_path)
+            except Exception as ckpt_err:
+                log.warning("Could not load best checkpoint (non-fatal): %s. Returning last-epoch weights.", ckpt_err)
 
     if best_state_dict is None:
         best_state_dict = {
@@ -442,12 +724,20 @@ def train_model(
     # --- Optional HF Hub push ---
     hf_repo_id = safe_get(config, ['save_paths', 'hf_hub_repo_id'], None)
     if hf_repo_id:
-        try:
-            val_f1_vals = [v for v in history.get("val_f1", []) if not np.isnan(v)]
-            metrics = {"best_val_f1": max(val_f1_vals)} if val_f1_vals else {}
-            lit_model.push_to_hub(hf_repo_id, metrics=metrics)
-        except Exception as hub_err:
-            log.warning(f"HF Hub push failed (non-fatal): {hub_err}")
+        with training_stage(log, "push_to_hf_hub", device, repo=hf_repo_id):
+            try:
+                # history is a list of per-epoch metric dicts (see HistoryCallback).
+                val_f1_vals = [
+                    epoch_metrics["val_f1"]
+                    for epoch_metrics in (history or [])
+                    if isinstance(epoch_metrics, dict)
+                    and "val_f1" in epoch_metrics
+                    and not np.isnan(epoch_metrics["val_f1"])
+                ]
+                metrics = {"best_val_f1": max(val_f1_vals)} if val_f1_vals else {}
+                lit_model.push_to_hub(hf_repo_id, metrics=metrics)
+            except Exception as hub_err:
+                log.warning("HF Hub push failed (non-fatal): %s", hub_err)
 
     log.info("--- Model Training Finished (Lightning) ---")
     return best_state_dict, history

@@ -105,7 +105,7 @@ def _load_backbone(
     try:
         # 1. Instantiate the 200M parameter model class
         # Note: version 2.5 takes torch_compile in __init__
-        use_torch_compile = device.type == "cuda"
+        use_torch_compile = False
         backbone = timesfm.TimesFM_2p5_200M_torch(torch_compile=use_torch_compile)
 
         # 2. Download and load weights manually (Hugging Face Hub)
@@ -177,10 +177,13 @@ class TimesFMEmbeddingExtractor(nn.Module):
 
         # Will be populated in _attach()
         self._backbone: Optional[nn.Module] = None
+        self.backbone_module: Optional[nn.Module] = None
         self._hook_handle = None
         self._captured_hidden: Optional[torch.Tensor] = None
         self.embed_dim: int = TIMESFM_EMBED_DIM
         self._hook_ok: bool = False
+        self._zero_embed_warned: bool = False
+        self._embed_dim_warned: bool = False
 
     # ------------------------------------------------------------------
     def _attach(self) -> None:
@@ -195,6 +198,7 @@ class TimesFMEmbeddingExtractor(nn.Module):
             self.normalize_inputs,
             self.device,
         )
+        self.backbone_module = self._backbone.model
         self._hook_ok = self._register_hook()
 
     def _register_hook(self) -> bool:
@@ -253,11 +257,14 @@ class TimesFMEmbeddingExtractor(nn.Module):
         self._attach()
         N, T = x.shape
 
-        # Truncate / pad context to configured length
+        # Truncate / pad context to configured length. TimesFM front-pads short
+        # series, so we mirror that and remember how much was padded.
+        pad_len = 0
         if T > self.context_len:
             x = x[:, -self.context_len:]
         elif T < self.context_len:
-            pad = torch.zeros(N, self.context_len - T, device=x.device, dtype=x.dtype)
+            pad_len = self.context_len - T
+            pad = torch.zeros(N, pad_len, device=x.device, dtype=x.dtype)
             x = torch.cat([pad, x], dim=1)
 
         self._captured_hidden = None
@@ -291,11 +298,18 @@ class TimesFMEmbeddingExtractor(nn.Module):
                     # 1. Prepare inputs: reshape to (N, -1, patch_size)
                     patch_size = self._backbone.model.p
                     patched_x = x.reshape(N, -1, patch_size)
-                    
-                    # 2. Create masks (everything valid = False)
-                    # Use empty + fill_ for faster allocation than zeros_like
-                    masks = torch.empty_like(patched_x, dtype=torch.bool, device=x.device).fill_(False)
-                    
+
+                    # 2. Build masks. TimesFM convention (see timesfm_2p5_torch
+                    # tokenizer): True = padded/invalid, and padded positions are
+                    # zeroed before per-patch normalization. Marking the front-pad
+                    # region True prevents the zero padding from corrupting the
+                    # normalization stats and the pooled embedding. With no padding
+                    # the mask is all-False (every position valid).
+                    flat_mask = torch.zeros(N, self.context_len, dtype=torch.bool, device=x.device)
+                    if pad_len > 0:
+                        flat_mask[:, :pad_len] = True
+                    masks = flat_mask.reshape(N, -1, patch_size)
+
                     # 3. Call internal forward pass directly to preserve batching
                     # In 2.5, calling the backbone.model(...) triggers the transformer stack
                     # and our hook catches the last activation.
@@ -312,12 +326,31 @@ class TimesFMEmbeddingExtractor(nn.Module):
             h = self._captured_hidden  # (N, T', d_model) or (N, d_model)
             if h.ndim == 3:
                 h = h.mean(dim=1)       # temporal mean pooling → (N, d_model)
+            # The classification head was built for self.embed_dim; a mismatch here
+            # surfaces downstream as a cryptic Linear matmul error. Diagnose once.
+            if h.shape[-1] != self.embed_dim and not self._embed_dim_warned:
+                self._embed_dim_warned = True
+                log.error(
+                    "TimesFM hidden dim (%s) != configured embed_dim (%s); the "
+                    "classification head will shape-mismatch. Update TIMESFM_EMBED_DIM "
+                    "to match the backbone's true hidden size.",
+                    h.shape[-1], self.embed_dim,
+                )
             # If the device/dtype differs (hook captures on CPU when backbone is CPU)
             return h.to(device=x.device, dtype=torch.float32)
-        else:
-            # Fallback: point_forecast not captured — return zeros with correct dim
-            log.debug("Hook did not capture hidden state; returning zero embedding.")
-            return torch.zeros(N, self.embed_dim, device=x.device)
+
+        # Hook captured nothing: the backbone yields a zero embedding, so the
+        # classifier would learn only from static features / bias and silently
+        # ignore the time series. Warn loudly once instead of failing silently.
+        if not self._zero_embed_warned:
+            self._zero_embed_warned = True
+            log.error(
+                "TimesFM hook captured no hidden state (hook_ok=%s); returning ZERO "
+                "embeddings. The foundation backbone is contributing nothing to the "
+                "model — verify the hook target and the backbone forward signature.",
+                self._hook_ok,
+            )
+        return torch.zeros(N, self.embed_dim, device=x.device)
 
     def remove_hook(self) -> None:
         """Detach the forward hook (call during teardown)."""
@@ -370,6 +403,16 @@ class TimesFMEmbeddingExtractor(nn.Module):
             self._backbone.model.train()
             log.warning(
                 "Could not locate Transformer blocks; unfreezing all backbone params."
+            )
+            return
+
+        # Guard: last_n_blocks <= 0 would make block_modules[-0:] == block_modules[0:],
+        # silently unfreezing the ENTIRE stack instead of nothing.
+        if last_n_blocks <= 0:
+            self._backbone.model.eval()
+            log.warning(
+                "unfreeze_backbone called with last_n_blocks=%s (<= 0); "
+                "leaving the entire backbone frozen.", last_n_blocks
             )
             return
 

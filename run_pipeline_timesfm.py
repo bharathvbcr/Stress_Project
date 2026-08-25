@@ -53,7 +53,7 @@ from data_loader import load_all_datasets
 from preprocessing import preprocess_all_subjects
 from data_pipeline import prepare_dataloaders
 from models import get_model
-from training import train_model
+from training import train_model, training_stage
 from evaluation import evaluate_model
 
 # ------------------------------------------------------------------
@@ -131,12 +131,28 @@ def _print_gpu_info(device: torch.device, config: dict) -> None:
 def _build_phase2_config(config: dict, phase2_lr_factor: float) -> dict:
     """Return a config copy with a scaled-down learning rate for Phase 2."""
     cfg = copy.deepcopy(config)
-    base_lr = cfg.get("training_config", {}).get("learning_rate", 1e-4)
+    tc = cfg.setdefault("training_config", {})
+    base_lr = tc.get("learning_rate", 1e-4)
     phase2_lr = base_lr * phase2_lr_factor
-    cfg["training_config"]["learning_rate"] = phase2_lr
-    log.info(
-        f"Phase-2 LR: {base_lr:.2e} × {phase2_lr_factor} = {phase2_lr:.2e}"
-    )
+    tc["learning_rate"] = phase2_lr
+
+    # OneCycle (and any scheduler with an explicit peak) drives the effective LR
+    # from max_lr and overrides the optimizer's base lr. Scale max_lr by the same
+    # factor — otherwise Phase-2 fine-tuning runs at the Phase-1 peak LR despite
+    # the reduced learning_rate above.
+    lr_cfg = tc.get("lr_scheduler")
+    scaled_max_lr = None
+    if isinstance(lr_cfg, dict) and lr_cfg.get("max_lr") is not None:
+        scaled_max_lr = lr_cfg["max_lr"] * phase2_lr_factor
+        lr_cfg["max_lr"] = scaled_max_lr
+
+    if scaled_max_lr is not None:
+        log.info(
+            f"Phase-2 LR: {base_lr:.2e} × {phase2_lr_factor} = {phase2_lr:.2e} "
+            f"| scheduler max_lr → {scaled_max_lr:.2e}"
+        )
+    else:
+        log.info(f"Phase-2 LR: {base_lr:.2e} × {phase2_lr_factor} = {phase2_lr:.2e}")
     return cfg
 
 
@@ -145,30 +161,32 @@ def _build_phase2_config(config: dict, phase2_lr_factor: float) -> dict:
 # ==================================================================
 
 def main() -> None:
-    runtime_caps = configure_torch_runtime()
-    log_runtime_capabilities(log, runtime_caps, prefix="Training Runtime")
+    with training_stage(log, "timesfm_runtime_setup"):
+        runtime_caps = configure_torch_runtime()
+        log_runtime_capabilities(log, runtime_caps, prefix="Training Runtime")
 
     log.info("=" * 70)
     log.info("  StressProject — TimesFM 2.5 Foundation Model Pipeline")
     log.info("=" * 70)
 
     # --- Check TimesFM availability before spending time preprocessing ---
-    try:
-        from timesfm_wrapper import is_available as timesfm_ok
-        if not timesfm_ok():
+    with training_stage(log, "timesfm_availability_check"):
+        try:
+            from timesfm_wrapper import is_available as timesfm_ok
+            if not timesfm_ok():
+                log.error(
+                    "TimesFM package is not installed!\n"
+                    "Install with:  pip install 'timesfm[torch]>=2.5.0'\n"
+                    "Aborting."
+                )
+                sys.exit(1)
+            log.info("✓ timesfm package is available.")
+        except ImportError:
             log.error(
-                "TimesFM package is not installed!\n"
-                "Install with:  pip install 'timesfm[torch]>=2.5.0'\n"
-                "Aborting."
+                "timesfm_wrapper not found.  Make sure timesfm_wrapper.py is in the "
+                "project directory and that 'timesfm' is installed."
             )
             sys.exit(1)
-        log.info("✓ timesfm package is available.")
-    except ImportError:
-        log.error(
-            "timesfm_wrapper not found.  Make sure timesfm_wrapper.py is in the "
-            "project directory and that 'timesfm' is installed."
-        )
-        sys.exit(1)
 
     # --- Phase settings ---
     force_frozen = os.environ.get("TIMESFM_FREEZE", "0") == "1"
@@ -179,11 +197,12 @@ def main() -> None:
     # Stage 1: Config
     # ----------------------------------------------------------------
     log.info("\n[Stage 1] Loading Configuration")
-    config = load_config("config.json")
-    if not config:
-        log.error("Failed to load configuration. Exiting.")
-        return
-    config = _patch_config_for_timesfm(config)
+    with training_stage(log, "timesfm_config"):
+        config = load_config("config.json")
+        if not config:
+            log.error("Failed to load configuration. Exiting.")
+            return
+        config = _patch_config_for_timesfm(config)
 
     total_epochs: int = config.get("training_config", {}).get("epochs", 50)
     log.info(
@@ -198,16 +217,18 @@ def main() -> None:
     # Stage 2: Data Loading (generator — lazy)
     # ----------------------------------------------------------------
     log.info("\n[Stage 2] Data Loading (Generator Setup)")
-    raw_data_placeholder = {}
-    loaded_ids_placeholder = []
+    with training_stage(log, "timesfm_data_generator_setup"):
+        raw_data_placeholder = {}
+        loaded_ids_placeholder = []
 
     # ----------------------------------------------------------------
     # Stage 3: Preprocessing
     # ----------------------------------------------------------------
     log.info("\n[Stage 3] Preprocessing (Resampling, Alignment, Feature Extraction)")
-    processed_data_paths, static_features, r_peaks = preprocess_all_subjects(
-        raw_data_placeholder, loaded_ids_placeholder, config
-    )
+    with training_stage(log, "timesfm_preprocessing"):
+        processed_data_paths, static_features, r_peaks = preprocess_all_subjects(
+            raw_data_placeholder, loaded_ids_placeholder, config
+        )
     if not processed_data_paths:
         log.error("Preprocessing failed (no subjects processed). Exiting.")
         return
@@ -216,9 +237,10 @@ def main() -> None:
     # Stage 4: DataLoaders
     # ----------------------------------------------------------------
     log.info("\n[Stage 4] Preparing DataLoaders (Windows, Splits, Sampling)")
-    train_loader, val_loader, test_loader, seq_dim, static_dim = prepare_dataloaders(
-        processed_data_paths, static_features, config
-    )
+    with training_stage(log, "timesfm_dataloader_build"):
+        train_loader, val_loader, test_loader, seq_dim, static_dim = prepare_dataloaders(
+            processed_data_paths, static_features, config
+        )
     if not train_loader:
         log.error("Failed to create DataLoaders. Exiting.")
         return
@@ -232,14 +254,15 @@ def main() -> None:
     _print_gpu_info(device, config)
 
     try:
-        model = get_model(config, seq_dim, static_dim)
-        if not hasattr(model, "freeze_backbone"):
-            log.error(
-                "Built model does not have freeze_backbone(). "
-                "TimesFM model was not instantiated (likely fell back to CNN-LSTM). "
-                "Check logs above."
-            )
-        model.to(device)
+        with training_stage(log, "timesfm_model_build", device):
+            model = get_model(config, seq_dim, static_dim)
+            if not hasattr(model, "freeze_backbone"):
+                log.error(
+                    "Built model does not have freeze_backbone(). "
+                    "TimesFM model was not instantiated (likely fell back to CNN-LSTM). "
+                    "Check logs above."
+                )
+            model.to(device)
     except Exception as exc:
         log.error(f"Failed to build model: {exc}", exc_info=True)
         return
@@ -260,14 +283,36 @@ def main() -> None:
     log.info(f"Phase-1 LR: {phase1_lr:.2e}  |  epochs: {phase1_epochs}")
 
     try:
-        best_state_p1, history_p1 = train_model(
-            model,
-            train_loader,
-            val_loader,
-            phase1_config,
-            device,
-            config["save_paths"].get("models"),
-        )
+        from mlx_timesfm_training import run_timesfm_mlx_phase1, should_use_mlx_timesfm_phase1
+
+        use_mlx_phase1 = should_use_mlx_timesfm_phase1("TIMESFM", runtime_caps)
+        if use_mlx_phase1:
+            log.info("TimesFM Phase 1: MLX head training (frozen PyTorch backbone)")
+            with training_stage(log, "timesfm_mlx_phase1", device, epochs=phase1_epochs):
+                run_timesfm_mlx_phase1(
+                    datamodule=None,
+                    config=config,
+                    torch_model=model,
+                    device=device,
+                    epochs=phase1_epochs,
+                    output_dir=config["save_paths"].get("models"),
+                    train_loader=train_loader,
+                    val_loader=val_loader,
+                    test_loader=test_loader,
+                    input_dim_static=static_dim,
+                )
+            best_state_p1 = model.state_dict()
+            history_p1 = {}
+        else:
+            with training_stage(log, "timesfm_phase1_training", device, epochs=phase1_epochs):
+                best_state_p1, history_p1 = train_model(
+                    model,
+                    train_loader,
+                    val_loader,
+                    phase1_config,
+                    device,
+                    config["save_paths"].get("models"),
+                )
     except Exception as exc:
         log.error(f"Phase-1 training failed: {exc}", exc_info=True)
         return
@@ -297,23 +342,37 @@ def main() -> None:
         )
 
         n_blocks = config["model_config"].get("timesfm_finetune_last_n_blocks", 4)
-        if hasattr(model, "unfreeze_backbone"):
+        from timesfm_lora import should_use_timesfm_lora_phase2
+
+        if should_use_timesfm_lora_phase2(runtime_caps) and hasattr(model, "apply_backbone_lora"):
+            log.info("TimesFM Phase 2: LoRA adapters on last %s block(s)", n_blocks)
+            model.apply_backbone_lora(last_n_blocks=n_blocks)
+        elif hasattr(model, "unfreeze_backbone"):
             model.unfreeze_backbone(last_n_blocks=n_blocks)
 
         phase2_config = _build_phase2_config(config, phase2_lr_factor)
         phase2_config["training_config"]["epochs"] = phase2_epochs
 
         try:
-            best_state_p2, history_p2 = train_model(
-                model,
-                train_loader,
-                val_loader,
-                phase2_config,
-                device,
-                config["save_paths"].get("models"),
-            )
+            with training_stage(log, "timesfm_phase2_training", device, epochs=phase2_epochs):
+                best_state_p2, history_p2 = train_model(
+                    model,
+                    train_loader,
+                    val_loader,
+                    phase2_config,
+                    device,
+                    config["save_paths"].get("models"),
+                )
             best_state_final = best_state_p2 if best_state_p2 else best_state_p1
             history_final = history_p2
+            from mlx_hybrid import export_timesfm_mlx_artifacts
+
+            export_timesfm_mlx_artifacts(
+                config,
+                model,
+                input_dim_static=static_dim,
+                output_dir=config["save_paths"].get("models"),
+            )
         except Exception as exc:
             log.error(f"Phase-2 training failed: {exc}", exc_info=True)
             log.warning("Falling back to best Phase-1 model for evaluation.")
@@ -332,15 +391,16 @@ def main() -> None:
         log.warning("No best state available; using final model state.")
 
     try:
-        results = evaluate_model(
-            model,
-            test_loader,
-            None,
-            device,
-            config,
-            config["save_paths"].get("results"),
-            set_name="Test Set (TimesFM)",
-        )
+        with training_stage(log, "timesfm_evaluation", device):
+            results = evaluate_model(
+                model,
+                test_loader,
+                None,
+                device,
+                config,
+                config["save_paths"].get("results"),
+                set_name="Test Set (TimesFM)",
+            )
         if results:
             log.info("Pipeline completed successfully.")
             print("\n" + "=" * 50)

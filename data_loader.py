@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, Optional, Tuple, List, Union
 
-from utils import safe_get, get_sampling_rate
+from utils import safe_get, get_sampling_rate, timeit
 
 log = logging.getLogger(__name__)
 
@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 # == WESAD Data Loading ==
 # ==============================================================================
 
+@timeit
 def load_wesad_subject_data(subject_id: int, wesad_config: Dict[str, Any], main_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Loads WESAD .pkl data for a single subject.
@@ -166,6 +167,7 @@ def _parse_custom_time(time_str: str) -> Optional[float]:
         # log.warning(f"Failed to parse time string: {time_str}")
         return None # Error during parsing/conversion
 
+@timeit
 def load_nurse_dataset(nurse_config: Dict[str, Any], main_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Loads and preprocesses data from the nurse stress CSV dataset.

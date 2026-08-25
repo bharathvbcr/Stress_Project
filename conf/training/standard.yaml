@@ -1,5 +1,5 @@
 epochs: 50
-batch_size: 4
+batch_size: 32
 learning_rate: 0.0001
 optimizer: "lion"
 weight_decay: 0.01
@@ -7,14 +7,31 @@ momentum: 0.9
 loss_function: "bce"
 focal_loss_alpha: 0.5
 focal_loss_gamma: 2.0
-sampling_strategy: "smote"
+sampling_strategy: "random"
 mixed_precision: true
 torch_compile: false
-accumulation_steps: 4
+accumulation_steps: 1
+enable_progress_bar: false
 lr_scheduler:
   enabled: true
   type: "onecycle"
   max_lr: 0.001
+
+diagnostics:
+  enabled: true
+  log_every_n_steps: 25
+  cuda_sync_interval: 25
+  memory_log_interval: 50
+  step_detail: true
+  step_detail_interval: 25
+  step_detail_cuda_sync_interval: 25
+  epoch_memory_summary: false
+  weight_stats: true
+  stability_check_interval: 50
+  profiler:
+    enabled: false
+    type: "pytorch"
+    dirpath: "outputs/profiler_results"
 
 early_stopping:
   patience: 5

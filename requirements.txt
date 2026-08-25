@@ -1,5 +1,5 @@
 torch>=2.0.0
-numpy>=1.24.0,<2.4
+numpy>=2.0.0,<2.3
 pandas>=2.0.0
 scikit-learn>=1.3.0
 scipy>=1.10.0
@@ -17,8 +17,8 @@ torchmetrics>=1.0.0
 plotly>=5.0.0
 hydra-core>=1.3.2
 wandb>=0.15.20
-datasets>=2.14.0
-pyarrow==20.0.0
+datasets>=4.8.5
+pyarrow>=21.0.0,<25.0.0
 streamlit>=1.25.0
 deepchecks>=0.14.0
 dvc>=3.0.0
@@ -26,4 +26,9 @@ fastapi>=0.100.0
 uvicorn>=0.22.0
 # TimesFM (Time Series Foundation Model) — Google Research
 timesfm[torch]>=1.3.0
-huggingface-hub>=0.20.0
+huggingface-hub>=1.0.0,<2.0.0
+# CUDA Python 1.0 — NVIDIA low-level CUDA bindings (optional; enables fast H2D transfer path in api.py)
+# The environment marker restricts installation to Linux/Windows x86_64 — platforms where a CUDA driver
+# is realistically present. Falls back gracefully to torch.Tensor.copy_() if the package is absent.
+# For full CUDA development setups see requirements-cuda.txt.
+cuda-python>=1.0; sys_platform != "darwin" and platform_machine == "x86_64"

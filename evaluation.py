@@ -1,18 +1,19 @@
 # evaluation.py (Handles model evaluation, metrics, and plots)
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 import logging
+import os
+import collections # For counting labels/predictions
+from typing import Dict, Any, Optional, Tuple, List
+
+import numpy as np
+import pandas as pd
 from sklearn.metrics import (classification_report, confusion_matrix, accuracy_score,
                              f1_score, precision_score, recall_score,
                              precision_recall_curve, roc_curve, auc, average_precision_score)
-import numpy as np
-import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from typing import Dict, Any, Optional, Tuple, List
-import os
-import collections # For counting labels/predictions
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
 
 # --- Import SHAP safely ---
 try:
@@ -216,7 +217,7 @@ def evaluate_model(
             # --- Calculate Loss (Optional) ---
             if criterion:
                 try:
-                    loss = criterion(outputs.squeeze(), labels.float())
+                    loss = criterion(outputs.squeeze(-1), labels.float())
                     total_loss += loss.item() * batch_size # Accumulate loss weighted by batch size
                 except Exception as loss_e:
                      log.warning(f"{set_name} Batch {batch_idx}: Loss calculation error: {loss_e}. Skipping loss for this batch.")
@@ -225,7 +226,7 @@ def evaluate_model(
             # --- Get Probabilities and Predictions ---
             try:
                 # Apply sigmoid to logits to get probabilities
-                probs = torch.sigmoid(outputs.squeeze())
+                probs = torch.sigmoid(outputs.squeeze(-1))
                 # Apply threshold to get binary predictions
                 preds = (probs > threshold).int()
                 # Collect results (move to CPU, convert to numpy)

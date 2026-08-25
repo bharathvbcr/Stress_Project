@@ -1,0 +1,19 @@
+# requirements-cuda.txt — Full CUDA development dependencies
+# Install after requirements.txt on machines with a CUDA-capable GPU and CUDA 12.x+ driver:
+#   pip install -r requirements.txt
+#   pip install -r requirements-cuda.txt
+#
+# These packages are excluded from requirements.txt because they either:
+#   (a) require a CUDA driver at install time (cuda-python), or
+#   (b) are not available on CPU-only or macOS platforms (tensorrt, torch-tensorrt)
+#
+# cuda-python 1.0 — NVIDIA CUDA Python bindings (cuda.bindings namespace)
+# Enables the fast H2D cudaMemcpy transfer path in api.py.
+# Minimum CUDA driver version: 12.0 (CUDA 12.x). Requires CUDA 13.3+ for full 1.0 feature support.
+cuda-python>=1.0
+
+# TensorRT — NVIDIA inference optimizer (optional, for export_trt.py)
+# tensorrt>=10.0.0
+
+# Torch-TensorRT — PyTorch TensorRT integration (optional, for export_trt.py)
+# torch-tensorrt>=2.0.0

@@ -25,6 +25,8 @@ from utils import (
     safe_get,
 )
 
+from benchmark import measure_latency_and_memory
+
 
 def export_to_trt(ckpt_path, output_path, config_path="config.json", input_shape=None):
     """
@@ -67,15 +69,31 @@ def export_to_trt(ckpt_path, output_path, config_path="config.json", input_shape
     # 2. Compile with Torch-TensorRT
     # Using FP16 for massive speedup on 30-series/40-series GPUs
     try:
+        log.info("Starting TensorRT compilation (this may take several minutes)...")
         trt_model = torch_tensorrt.compile(model, 
             inputs=[torch_tensorrt.Input(input_shape)],
             enabled_precisions={torch.float16}, # FP16 half-precision
             workspace_size=1 << 30 # 1GB workspace
         )
-        
+
         # 3. Save the compiled engine (as a TorchScript module)
         torch.jit.save(trt_model, output_path)
-        log.info(f"✓ TensorRT engine saved to: {output_path}")
+        log.info(f"TensorRT engine saved to: {output_path}")
+
+        # 4. Benchmark TRT vs Raw PyTorch
+        log.info("=== Running Post-Export Benchmarks ===")
+        num_iters = 500
+
+        # Baseline
+        log.info("Benchmarking Base PyTorch FP32...")
+        base_avg = measure_latency_and_memory(model, example_input, num_iters, "cuda", "Base FP32")
+
+        # TRT
+        log.info("Benchmarking TensorRT FP16...")
+        trt_avg = measure_latency_and_memory(trt_model, example_input, num_iters, "cuda", "TensorRT FP16")
+
+        log.info(f"Final TensorRT speedup: {base_avg / trt_avg:.2f}x")
+
     except Exception as e:
         log.error(f"TensorRT compilation failed: {e}")
 

@@ -1,0 +1,106 @@
+name: MLX Smoke Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mlx_*.py"
+      - "timesfm_lora.py"
+      - "convert_*_mlx.py"
+      - "tests/test_mlx_*.py"
+      - "tests/test_timesfm_lora*.py"
+      - "requirements-apple.txt"
+      - "performance_guard.py"
+      - "benchmark.py"
+      - "models.py"
+      - ".github/workflows/mlx-smoke.yml"
+  pull_request:
+    paths:
+      - "mlx_*.py"
+      - "timesfm_lora.py"
+      - "convert_*_mlx.py"
+      - "tests/test_mlx_*.py"
+      - "tests/test_timesfm_lora*.py"
+      - "requirements-apple.txt"
+      - "performance_guard.py"
+      - "benchmark.py"
+      - "models.py"
+      - ".github/workflows/mlx-smoke.yml"
+
+jobs:
+  mlx-smoke-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch numpy scikit-learn
+          pip install -r requirements-apple.txt
+
+      - name: Run MLX unit tests
+        run: |
+          python -m unittest \
+            tests.test_mlx_models \
+            tests.test_mlx_convert \
+            tests.test_mlx_timesfm_training \
+            tests.test_timesfm_lora \
+            tests.test_timesfm_lora_inference \
+            -v
+
+  perf-guard-macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch numpy scikit-learn
+          pip install -r requirements-apple.txt
+
+      # config.json defaults to TIMESFM, which pulls a large HF backbone.
+      # CI guards latency with a lightweight LSTM derived from the same config.
+      - name: Build lightweight CI perf config
+        run: |
+          python - <<'PY'
+          import json
+
+          with open("config.json") as f:
+              cfg = json.load(f)
+          cfg.setdefault("model_config", {})["type"] = "LSTM"
+          with open("ci_perf_config.json", "w") as f:
+              json.dump(cfg, f, indent=2)
+          print("Wrote ci_perf_config.json (model type: LSTM)")
+          PY
+
+      # First run on a new key establishes the baseline and caches it;
+      # subsequent runs compare P99 against it and fail on regression.
+      - name: Restore performance baseline
+        uses: actions/cache@v4
+        with:
+          path: perf_baseline_ci.json
+          key: perf-baseline-${{ runner.os }}-${{ runner.arch }}-lstm-v1
+
+      # Shared CI runners are noisy; 1.5x P99 budget avoids flaky failures
+      # while still catching real (order-of-magnitude) regressions.
+      - name: Run performance guard
+        run: |
+          python performance_guard.py \
+            --config ci_perf_config.json \
+            --baseline perf_baseline_ci.json \
+            --threshold 1.50 \
+            --iters 100

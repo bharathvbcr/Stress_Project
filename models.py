@@ -145,8 +145,19 @@ class StressCNNLSTM(nn.Module):
         self.lstm_output_dim = self.hidden_dim_last_lstm * self.lstm_output_multiplier
         if self.use_attention:
             if self.lstm_output_dim % self.attn_heads != 0:
-                 # Logic to adjust heads... omitted for brevity, assumed safe or handled
-                 pass
+                # nn.MultiheadAttention requires embed_dim divisible by num_heads.
+                # Fall back to the largest valid head count <= the requested value
+                # (range always includes 1, which divides any dim), instead of
+                # constructing with an invalid combo that raises at build time.
+                valid_heads = next(
+                    (h for h in range(self.attn_heads, 0, -1) if self.lstm_output_dim % h == 0),
+                    1,
+                )
+                log.warning(
+                    "attn_heads=%s does not divide lstm_output_dim=%s; adjusting to %s heads.",
+                    self.attn_heads, self.lstm_output_dim, valid_heads,
+                )
+                self.attn_heads = valid_heads
             self.attention = nn.MultiheadAttention(embed_dim=self.lstm_output_dim, num_heads=self.attn_heads, dropout=dropout, batch_first=True)
 
         self.fc = nn.Linear(self.lstm_output_dim, self.output_dim)
@@ -499,6 +510,9 @@ class StressTimesFM(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(head_hidden_dim // 2, output_dim),
         )
+        self.lora_adapters = nn.ModuleList()
+        self._lora_hook_handles: list = []
+        self._lora_last_n_blocks = 0
 
         log.info(
             f"StressTimesFM initialised — checkpoint='{checkpoint}', "
@@ -527,6 +541,29 @@ class StressTimesFM(nn.Module):
         """Partially unfreeze backbone for Phase-2 fine-tuning."""
         self._ensure_attached()
         self.extractor.unfreeze_backbone(last_n_blocks=last_n_blocks)
+
+    def apply_backbone_lora(
+        self,
+        last_n_blocks: int = 4,
+        rank: int | None = None,
+        alpha: float | None = None,
+    ) -> None:
+        """Attach LoRA adapters to the last N TimesFM blocks (Phase-2 alternative)."""
+        from timesfm_lora import (
+            apply_lora_to_blocks,
+            resolve_timesfm_lora_alpha,
+            resolve_timesfm_lora_rank,
+        )
+
+        self._ensure_attached()
+        rank = rank if rank is not None else resolve_timesfm_lora_rank()
+        alpha = alpha if alpha is not None else resolve_timesfm_lora_alpha()
+        blocks = self.extractor._backbone.model.stacked_xf
+        adapters, _, handles = apply_lora_to_blocks(blocks, last_n_blocks, rank, alpha)
+        self.lora_adapters = adapters
+        self._lora_hook_handles = handles
+        self._lora_last_n_blocks = last_n_blocks
+        self.extractor._backbone.model.train()
 
     # ------------------------------------------------------------------
     def forward(

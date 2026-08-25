@@ -10,6 +10,7 @@ from utils import (
     configure_torch_runtime,
     load_config,
     log_runtime_capabilities,
+    safe_get,
     select_torch_device,
     setup_logging,
 )
@@ -17,7 +18,7 @@ from data_loader import load_all_datasets
 from preprocessing import preprocess_all_subjects
 from data_pipeline import prepare_dataloaders
 from models import get_model
-from training import train_model
+from training import train_model, training_stage
 from evaluation import evaluate_model
 
 # Initialize logging immediately
@@ -26,42 +27,46 @@ log = logging.getLogger(__name__)
 
 def main():
     log.info("=== Starting Stress Detection Pipeline (Full Run) ===")
-    
+
     # 1. Config
     log.info("Stage 1: Loading Configuration")
-    config = load_config('config.json')
-    if not config:
-        log.error("Failed to load configuration. Exiting.")
-        return
-    runtime_caps = configure_torch_runtime()
-    log_runtime_capabilities(log, runtime_caps, prefix="Training Runtime")
+    with training_stage(log, "pipeline_config"):
+        config = load_config('config.json')
+        if not config:
+            log.error("Failed to load configuration. Exiting.")
+            return
+        runtime_caps = configure_torch_runtime()
+        log_runtime_capabilities(log, runtime_caps, prefix="Training Runtime")
 
     # 2. Data Loading (Lazy)
     log.info("Stage 2: Data Loading (Generator Setup)")
-    # We skip full loading here to save memory. 
-    # preprocess_all_subjects will use the generator internally.
-    raw_data_placeholder = {} 
-    loaded_ids_placeholder = []
-    
+    with training_stage(log, "pipeline_data_generator_setup"):
+        # We skip full loading here to save memory.
+        # preprocess_all_subjects will use the generator internally.
+        raw_data_placeholder = {}
+        loaded_ids_placeholder = []
+
     # 3. Preprocessing
     log.info("Stage 3: Preprocessing (Resampling, Alignment, Feature Extraction)")
     # Pass placeholders; the function uses yield_all_subjects(config) internally
-    processed_data_paths, static_features, r_peaks = preprocess_all_subjects(raw_data_placeholder, loaded_ids_placeholder, config)
-    
+    with training_stage(log, "pipeline_preprocessing"):
+        processed_data_paths, static_features, r_peaks = preprocess_all_subjects(raw_data_placeholder, loaded_ids_placeholder, config)
+
     if not processed_data_paths:
         log.error("Preprocessing failed (no subjects processed). Exiting.")
         return
-    
+
     # 4. Pipeline (Windowing, Splitting, Sampling, Loader Creation)
     log.info("Stage 4: Preparing Pipeline (Windows, Splits, Sampling, Loaders)")
     # processed_data_paths is now a dict of file paths
-    train_loader, val_loader, test_loader, seq_dim, static_dim = prepare_dataloaders(
-        processed_data_paths, static_features, config
-    )
+    with training_stage(log, "pipeline_dataloader_build"):
+        train_loader, val_loader, test_loader, seq_dim, static_dim = prepare_dataloaders(
+            processed_data_paths, static_features, config
+        )
     if not train_loader:
         log.error("Failed to create DataLoaders. Exiting.")
         return
-    
+
     # 5. Model
     log.info("Stage 5: Building Model")
     device = select_torch_device(runtime_caps)
@@ -71,29 +76,53 @@ def main():
         log.info(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
     elif device.type == "mps":
         log.info("Using Apple MPS acceleration via PyTorch/Lightning.")
-    
+
+    model_type = safe_get(config, ["model_config", "type"], "CNN-LSTM").upper()
+    from mlx_training import run_mlx_training_loaders, should_use_mlx_training
+
+    if should_use_mlx_training(model_type, runtime_caps):
+        log.info("Stage 5-7: MLX training backend for model=%s", model_type)
+        try:
+            with training_stage(log, "pipeline_mlx_training", device):
+                best_path = run_mlx_training_loaders(
+                    train_loader,
+                    val_loader,
+                    test_loader,
+                    config,
+                    model_type,
+                    seq_dim,
+                    static_dim,
+                    output_dir=config["save_paths"].get("models"),
+                )
+            log.info("MLX pipeline complete. Best checkpoint: %s", best_path)
+        except Exception as e:
+            log.error(f"MLX training failed: {e}", exc_info=True)
+        return
+
     try:
-        model = get_model(config, seq_dim, static_dim)
-        model.to(device)
+        with training_stage(log, "pipeline_model_build", device):
+            model = get_model(config, seq_dim, static_dim)
+            model.to(device)
     except Exception as e:
         log.error(f"Failed to build model: {e}", exc_info=True)
         return
-    
+
     # 6. Training
     log.info("Stage 6: Training Model")
     try:
-        best_state, history = train_model(
-            model, 
-            train_loader, 
-            val_loader, 
-            config, 
-            device, 
-            config['save_paths'].get('models')
-        )
+        with training_stage(log, "pipeline_training", device):
+            best_state, history = train_model(
+                model,
+                train_loader,
+                val_loader,
+                config,
+                device,
+                config['save_paths'].get('models')
+            )
     except Exception as e:
         log.error(f"Training failed: {e}", exc_info=True)
         return
-    
+
     # 7. Evaluation
     log.info("Stage 7: Evaluating on Test Set")
     if best_state:
@@ -103,15 +132,16 @@ def main():
         log.warning("Using final model state (no best state saved).")
 
     try:
-        results = evaluate_model(
-            model, 
-            test_loader, 
-            None, # Criterion optional for evaluation
-            device, 
-            config, 
-            config['save_paths'].get('results'), 
-            set_name="Test Set"
-        )
+        with training_stage(log, "pipeline_evaluation", device):
+            results = evaluate_model(
+                model,
+                test_loader,
+                None, # Criterion optional for evaluation
+                device,
+                config,
+                config['save_paths'].get('results'),
+                set_name="Test Set"
+            )
         if results:
             log.info("Pipeline completed successfully.")
             print("\nFinal Test Metrics:")

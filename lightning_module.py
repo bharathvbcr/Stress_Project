@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import tempfile
+import time
 from typing import Any, Dict, Optional
 
 import torch
@@ -21,6 +22,90 @@ from torchmetrics.classification import (
 from utils import safe_get
 
 log = logging.getLogger(__name__)
+
+
+def _diagnostics_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    diagnostics_cfg = safe_get(config, ["training_config", "diagnostics"], None)
+    if not isinstance(diagnostics_cfg, dict):
+        diagnostics_cfg = safe_get(config, ["diagnostics"], None)
+    return diagnostics_cfg if isinstance(diagnostics_cfg, dict) else {}
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off", "disabled", "none"}:
+            return False
+    return default
+
+
+def _as_positive_int(value: Any, default: int) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_nonnegative_int(value: Any, default: int) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _step_detail_enabled(config: Dict[str, Any], batch_idx: int) -> bool:
+    diagnostics_cfg = _diagnostics_config(config)
+    if not _coerce_bool(diagnostics_cfg.get("enabled", True), True):
+        return False
+    if not _coerce_bool(diagnostics_cfg.get("step_detail", True), True):
+        return False
+    interval = _as_positive_int(
+        diagnostics_cfg.get("step_detail_interval", diagnostics_cfg.get("log_every_n_steps", 1)),
+        1,
+    )
+    return batch_idx == 0 or (batch_idx + 1) % interval == 0
+
+
+def _step_cuda_sync_enabled(config: Dict[str, Any], batch_idx: int, device: torch.device) -> bool:
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return False
+    diagnostics_cfg = _diagnostics_config(config)
+    interval = _as_nonnegative_int(
+        diagnostics_cfg.get("step_detail_cuda_sync_interval", diagnostics_cfg.get("cuda_sync_interval", 0)),
+        0,
+    )
+    return interval > 0 and (batch_idx == 0 or (batch_idx + 1) % interval == 0)
+
+
+def _maybe_cuda_synchronize(device: torch.device, enabled: bool) -> bool:
+    if not enabled:
+        return False
+    try:
+        torch.cuda.synchronize(device)
+        return True
+    except Exception as exc:
+        log.warning("CUDA synchronize failed during step diagnostics: %s", exc)
+        return False
+
+
+def _shape_summary(value: Optional[torch.Tensor]) -> str:
+    if value is None:
+        return "None"
+    if hasattr(value, "shape"):
+        return f"shape={list(value.shape)} dtype={value.dtype} device={value.device}"
+    return type(value).__name__
+
+
+def _scalar(value: torch.Tensor) -> float:
+    return float(value.detach().float().mean().cpu())
 
 
 class StressLightningModule(L.LightningModule):
@@ -49,11 +134,15 @@ class StressLightningModule(L.LightningModule):
         from training import _get_criterion
         self.criterion = _get_criterion(config, pos_weight)
 
-        # Register pos_weight as buffer to avoid redundant device transfers
-        if pos_weight is not None:
-            self.register_buffer("pos_weight_buffer", pos_weight)
-        else:
-            self.register_buffer("pos_weight_buffer", torch.tensor([1.0]))
+        # Metric the LR scheduler should monitor; train_model overrides this to
+        # "train_loss" when no validation loader is supplied.
+        self._monitor_metric = "val_loss"
+
+        # Performance: Internal CUDA Events for nanosecond timing
+        self.enable_cuda_events = torch.cuda.is_available()
+        if self.enable_cuda_events:
+            self.start_event = torch.cuda.Event(enable_timing=True)
+            self.end_event = torch.cuda.Event(enable_timing=True)
 
         # torchmetrics — all binary classification
         self.train_acc  = BinaryAccuracy()
@@ -89,7 +178,14 @@ class StressLightningModule(L.LightningModule):
     # ------------------------------------------------------------------
 
     def forward(self, seq: torch.Tensor, static: Optional[torch.Tensor] = None):
-        return self.model(seq, static)
+        out = self.model(seq, static)
+
+        # Stability: Check for NaNs/Infs in activations
+        if self.config.get('debug_activations', False):
+            if torch.isnan(out).any() or torch.isinf(out).any():
+                log.error(f"NaN/Inf detected in model output! Shapes: seq={seq.shape}, static={static.shape if static is not None else 'None'}")
+
+        return out
 
     def freeze_backbone(self) -> None:
         """Expose backbone freeze controls to training entrypoints."""
@@ -101,26 +197,85 @@ class StressLightningModule(L.LightningModule):
         if hasattr(self.model, "unfreeze_backbone"):
             self.model.unfreeze_backbone(last_n_blocks=last_n_blocks)
 
+    def apply_backbone_lora(self, last_n_blocks: int = 4) -> None:
+        if hasattr(self.model, "apply_backbone_lora"):
+            self.model.apply_backbone_lora(last_n_blocks=last_n_blocks)
+
     # ------------------------------------------------------------------
     # Training step
     # ------------------------------------------------------------------
 
     def training_step(self, batch, batch_idx):
+        step_detail = _step_detail_enabled(self.config, batch_idx)
+        step_start = time.perf_counter()
+
         seq, static, labels = self._unpack(batch)
-        
-        # Ensure criterion uses the buffer-based weight if applicable
-        # Note: If using custom FocalLoss, we may need to pass the weight explicitly
-        # In this implementation, _get_criterion already built the module with the weight.
-        # However, for true buffer tracking, we re-ensure device affinity.
-        logits = self(seq, static).squeeze(-1)          # shape: (N,)
+        unpack_done = time.perf_counter()
+        cuda_sync_step = _step_cuda_sync_enabled(self.config, batch_idx, seq.device)
+        # CUDA events only matter when internal GPU profiling is on; recording them
+        # otherwise adds per-step overhead for numbers that are never read.
+        cuda_events_step = (
+            self.config.get('internal_gpu_profiling', False)
+            and self.enable_cuda_events
+            and seq.device.type == "cuda"
+        )
+        if cuda_events_step:
+            self.start_event.record()
+        _maybe_cuda_synchronize(seq.device, cuda_sync_step)
+
+        logits = self(seq, static).squeeze(-1)
+        _maybe_cuda_synchronize(seq.device, cuda_sync_step)
+        forward_done = time.perf_counter()
+
         loss = self.criterion(logits, labels.float())
+        _maybe_cuda_synchronize(seq.device, cuda_sync_step)
+        loss_done = time.perf_counter()
+
+        if cuda_events_step:
+            self.end_event.record()
+            torch.cuda.synchronize()
+            ms = self.start_event.elapsed_time(self.end_event)
+            self.log("perf/gpu_kernel_ms", ms, on_step=True, on_epoch=False)
 
         probs = torch.sigmoid(logits.detach())
         preds = (probs > 0.5).int()
 
         self.train_acc.update(preds, labels.int())
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log("train_acc",  self.train_acc, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train_acc",  self.train_acc, on_step=False, on_epoch=True, prog_bar=False)
+
+        metrics_done = time.perf_counter()
+        if step_detail:
+            unpack_ms = (unpack_done - step_start) * 1000
+            forward_ms = (forward_done - unpack_done) * 1000
+            loss_ms = (loss_done - forward_done) * 1000
+            metric_ms = (metrics_done - loss_done) * 1000
+            total_ms = (metrics_done - step_start) * 1000
+
+            self.log("time/train_unpack_ms", unpack_ms, on_step=True, on_epoch=False)
+            self.log("time/train_forward_ms", forward_ms, on_step=True, on_epoch=False)
+            self.log("time/train_loss_ms", loss_ms, on_step=True, on_epoch=False)
+            self.log("time/train_metrics_ms", metric_ms, on_step=True, on_epoch=False)
+            self.log("time/train_step_internal_ms", total_ms, on_step=True, on_epoch=False)
+            self.log("diag/train_logit_abs_max", logits.detach().abs().max(), on_step=True, on_epoch=False)
+            self.log("diag/train_label_mean", labels.detach().float().mean(), on_step=True, on_epoch=False)
+
+            log.info(
+                "Train step detail batch=%s unpack=%.3fms forward=%.3fms loss=%.3fms metrics=%.3fms total=%.3fms loss_value=%.6f logit_abs_max=%.6f label_mean=%.6f cuda_sync=%s seq[%s] static[%s] labels[%s]",
+                batch_idx + 1,
+                unpack_ms,
+                forward_ms,
+                loss_ms,
+                metric_ms,
+                total_ms,
+                _scalar(loss),
+                _scalar(logits.detach().abs().max()),
+                _scalar(labels.detach().float()),
+                cuda_sync_step,
+                _shape_summary(seq),
+                _shape_summary(static),
+                _shape_summary(labels),
+            )
         return loss
 
     # ------------------------------------------------------------------
@@ -128,9 +283,21 @@ class StressLightningModule(L.LightningModule):
     # ------------------------------------------------------------------
 
     def validation_step(self, batch, batch_idx):
+        step_detail = _step_detail_enabled(self.config, batch_idx)
+        step_start = time.perf_counter()
+
         seq, static, labels = self._unpack(batch)
+        unpack_done = time.perf_counter()
+        cuda_sync_step = _step_cuda_sync_enabled(self.config, batch_idx, seq.device)
+        _maybe_cuda_synchronize(seq.device, cuda_sync_step)
+
         logits = self(seq, static).squeeze(-1)          # shape: (N,)
+        _maybe_cuda_synchronize(seq.device, cuda_sync_step)
+        forward_done = time.perf_counter()
+
         loss = self.criterion(logits, labels.float())
+        _maybe_cuda_synchronize(seq.device, cuda_sync_step)
+        loss_done = time.perf_counter()
 
         probs = torch.sigmoid(logits.detach())
         preds = (probs > 0.5).int()
@@ -148,6 +315,39 @@ class StressLightningModule(L.LightningModule):
         self.log("val_prec",  self.val_prec,   on_step=False, on_epoch=True, prog_bar=False)
         self.log("val_rec",   self.val_rec,    on_step=False, on_epoch=True, prog_bar=False)
         self.log("val_auroc", self.val_auroc,  on_step=False, on_epoch=True, prog_bar=False)
+
+        metrics_done = time.perf_counter()
+        if step_detail:
+            unpack_ms = (unpack_done - step_start) * 1000
+            forward_ms = (forward_done - unpack_done) * 1000
+            loss_ms = (loss_done - forward_done) * 1000
+            metric_ms = (metrics_done - loss_done) * 1000
+            total_ms = (metrics_done - step_start) * 1000
+
+            self.log("time/val_unpack_ms", unpack_ms, on_step=True, on_epoch=False)
+            self.log("time/val_forward_ms", forward_ms, on_step=True, on_epoch=False)
+            self.log("time/val_loss_ms", loss_ms, on_step=True, on_epoch=False)
+            self.log("time/val_metrics_ms", metric_ms, on_step=True, on_epoch=False)
+            self.log("time/val_step_internal_ms", total_ms, on_step=True, on_epoch=False)
+            self.log("diag/val_logit_abs_max", logits.detach().abs().max(), on_step=True, on_epoch=False)
+            self.log("diag/val_label_mean", labels.detach().float().mean(), on_step=True, on_epoch=False)
+
+            log.info(
+                "Validation step detail batch=%s unpack=%.3fms forward=%.3fms loss=%.3fms metrics=%.3fms total=%.3fms loss_value=%.6f logit_abs_max=%.6f label_mean=%.6f cuda_sync=%s seq[%s] static[%s] labels[%s]",
+                batch_idx + 1,
+                unpack_ms,
+                forward_ms,
+                loss_ms,
+                metric_ms,
+                total_ms,
+                _scalar(loss),
+                _scalar(logits.detach().abs().max()),
+                _scalar(labels.detach().float()),
+                cuda_sync_step,
+                _shape_summary(seq),
+                _shape_summary(static),
+                _shape_summary(labels),
+            )
 
     # ------------------------------------------------------------------
     # Optimizer / Scheduler
@@ -176,7 +376,7 @@ class StressLightningModule(L.LightningModule):
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": scheduler,
-                    "monitor":   "val_loss",
+                    "monitor":   getattr(self, "_monitor_metric", "val_loss"),
                     "interval":  "epoch",
                     "frequency": 1,
                 },

@@ -1,15 +1,15 @@
-import lightning as L
-import torch
 import os
 import logging
 import sys
-from torch.utils.data import DataLoader
 from datasets import load_from_disk, Dataset
+import torch
+import lightning as L
+from torch.utils.data import DataLoader
 from typing import Dict, Any, Optional, Union
 
 from data_pipeline import get_data_splits
 from training import _calculate_pos_weight
-from utils import safe_get, resolve_hf_path
+from utils import safe_get, resolve_hf_path, timeit
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ class StressDataModule(L.LightningDataModule):
         self.test_ds = None
         self.pos_weight = None
 
+    @timeit
     def setup(self, stage: Optional[str] = None):
         """
         Loads Arrow datasets if they exist, otherwise runs the pipeline 
@@ -88,14 +89,22 @@ class StressDataModule(L.LightningDataModule):
         # Calculate pos_weight for imbalance
         self.pos_weight = self._calculate_pos_weight()
 
+        log.info(f"DataLoader Config: num_workers={self.num_workers}, pin_memory={self.pin_memory}, "
+                 f"prefetch_factor={self.prefetch_factor}, persistent_workers={self.persistent_workers}")
+
     def train_dataloader(self):
         num_workers = self.num_workers
+        # Fixed batch size keeps cudnn.benchmark autotuning stable and avoids a
+        # tiny, noisy final batch — but only drop when a full batch remains, or a
+        # dataset smaller than batch_size would yield zero training batches.
+        drop_last = len(self.train_ds) >= self.batch_size
         loader_kwargs = {
             "batch_size": self.batch_size,
             "shuffle": True,
             "pin_memory": self.pin_memory,
             "num_workers": num_workers,
             "persistent_workers": (num_workers > 0 and self.persistent_workers),
+            "drop_last": drop_last,
         }
         if num_workers > 0:
             loader_kwargs["prefetch_factor"] = self.prefetch_factor

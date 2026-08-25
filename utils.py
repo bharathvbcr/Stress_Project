@@ -1,12 +1,22 @@
 # utils.py (Updated with clear_files option in load_preprocessed_data)
 
+import glob
 import json
 import os
 import pprint # For pretty printing dictionaries (optional)
 import logging
+import time
+from functools import wraps
 from typing import Dict, Any, Optional, List, Union, Tuple
 
 import torch
+
+from mlx_backend import (
+    configure_mlx_runtime,
+    get_requested_backend,
+    is_mlx_available,
+    mlx_version,
+)
 
 # Import joblib safely for loading/saving processed data
 try:
@@ -19,6 +29,47 @@ except ImportError:
 log = logging.getLogger(__name__)
 # Example: Configure logging if running this file directly or if needed elsewhere
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(name)s] - %(message)s')
+
+def timeit(func):
+    """
+    Decorator to measure and log the execution time of a function.
+    Useful for profiling pre-processing and setup stages.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        duration = end_time - start_time
+        log.info(f"[Profiler] {func.__name__} executed in {duration:.4f} seconds")
+        return result
+    return wrapper
+
+def check_gpu_features():
+    """
+    Checks and logs advanced CUDA features useful for stress detection training.
+    """
+    if not torch.cuda.is_available():
+        return {"cuda": False}
+
+    props = torch.cuda.get_device_properties(0)
+    features = {
+        "cuda": True,
+        "name": props.name,
+        "capability": f"{props.major}.{props.minor}",
+        "bf16": torch.cuda.is_bf16_supported(),
+        "tf32": torch.cuda.get_tf32_threshold() > 0 or props.major >= 8,
+        "fp16_native": props.major >= 7,
+        "tensor_cores": props.major >= 7,
+        "total_mem_gb": props.total_memory / 1e9
+    }
+
+    log.info(f"=== Hardware Capability Check ===")
+    log.info(f"GPU: {features['name']} (CC {features['capability']})")
+    log.info(f"Support: BF16={features['bf16']}, TF32={features['tf32']}, FP16={features['fp16_native']}")
+    log.info(f"Architecture: {'Ampere+' if props.major >= 8 else ('Turing' if props.major == 7 else 'Legacy')}")
+    log.info(f"=================================")
+    return features
 
 # --- Configuration Loading ---
 def load_config(config_path: str = 'config.json') -> Optional[Dict[str, Any]]:
@@ -269,14 +320,20 @@ def get_runtime_capabilities() -> Dict[str, Any]:
         device_name = "cpu"
 
     bf16_supported = torch.cuda.is_bf16_supported() if cuda_available else False
-    precision = "bf16-mixed" if device_type == "cuda" and bf16_supported else ("16-mixed" if device_type == "cuda" else "32")
+    precision = (
+        "bf16-mixed"
+        if device_type == "cuda" and bf16_supported
+        else ("16-mixed" if device_type == "cuda" else "32")
+    )
     device_count = torch.cuda.device_count() if cuda_available else (1 if device_type == "mps" else 0)
 
     try:
-        import mlx.core as _mlx_core  # type: ignore  # noqa: F401
-        mlx_available = True
-    except ImportError:
+        mlx_available = is_mlx_available()
+    except Exception:
         mlx_available = False
+
+    backend_request = get_requested_backend()
+    mlx_runtime = configure_mlx_runtime() if mlx_available else {}
 
     try:
         import tensorrt  # type: ignore  # noqa: F401
@@ -290,12 +347,43 @@ def get_runtime_capabilities() -> Dict[str, Any]:
     except ImportError:
         torch_tensorrt_available = False
 
+    cuda_python_available = False
+    cuda_python_version = None        # CUDA *driver* version as seen through cuda-python (e.g. "13.3")
+    cuda_python_package_version = None  # The installed cuda-python *package* version (e.g. "1.0.0")
+    if cuda_available:
+        try:
+            from cuda import bindings  # type: ignore  # noqa: F401
+            from cuda.bindings import driver
+            err, = driver.cuInit(0)
+            if err == driver.CUresult.CUDA_SUCCESS:
+                cuda_python_available = True
+                err, ver = driver.cuDriverGetVersion()
+                if err == driver.CUresult.CUDA_SUCCESS:
+                    major = ver // 1000
+                    minor = (ver % 1000) // 10
+                    cuda_python_version = f"{major}.{minor}"
+                # Attempt to read the installed package version (cuda-python or cuda-bindings)
+                try:
+                    from importlib.metadata import version as _pkg_version, PackageNotFoundError
+                    try:
+                        cuda_python_package_version = _pkg_version("cuda-python")
+                    except PackageNotFoundError:
+                        cuda_python_package_version = _pkg_version("cuda-bindings")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     return {
         "torch_version": torch.__version__,
         "cuda_available": cuda_available,
         "mps_available": mps_available,
         "mps_built": mps_built,
         "mlx_available": mlx_available,
+        "mlx_version": mlx_version() if mlx_available else None,
+        "backend_request": backend_request,
+        "mlx_device": mlx_runtime.get("mlx_device"),
+        "mlx_compile": mlx_runtime.get("mlx_compile", False),
         "device": str(device),
         "device_type": device_type,
         "device_name": device_name,
@@ -309,6 +397,9 @@ def get_runtime_capabilities() -> Dict[str, Any]:
         "device_request_satisfied": requested_device in {"", "auto"} or requested_device == device_type or (requested_device == "gpu" and device_type == "cuda"),
         "tensorrt_available": tensorrt_available,
         "torch_tensorrt_available": torch_tensorrt_available,
+        "cuda_python_available": cuda_python_available,
+        "cuda_python_version": cuda_python_version,          # CUDA driver version (e.g. "13.3")
+        "cuda_python_package_version": cuda_python_package_version,  # Package version (e.g. "1.0.0")
     }
 
 
@@ -327,6 +418,17 @@ def configure_torch_runtime(runtime_caps: Optional[Dict[str, Any]] = None, enabl
         torch.set_float32_matmul_precision("high")
         if enable_cudnn_benchmark:
             torch.backends.cudnn.benchmark = True
+    elif runtime_caps.get("device_type") == "mps":
+        torch.set_float32_matmul_precision("high")
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+        watermark = os.environ.get("STRESS_MPS_HIGH_WATERMARK_RATIO", "").strip()
+        if watermark:
+            try:
+                torch.mps.set_per_process_memory_fraction(float(watermark))
+            except Exception as exc:
+                log.warning("Could not apply STRESS_MPS_HIGH_WATERMARK_RATIO=%s: %s", watermark, exc)
+    if runtime_caps.get("mlx_available"):
+        configure_mlx_runtime()
     return runtime_caps
 
 
@@ -334,12 +436,17 @@ def log_runtime_capabilities(logger: logging.Logger, runtime_caps: Optional[Dict
     """Log a one-line runtime capability summary."""
     runtime_caps = runtime_caps or get_runtime_capabilities()
     logger.info(
-        "%s: torch=%s cuda=%s mps=%s mlx=%s device=%s device_name=%s accelerator=%s devices=%s precision=%s tensorrt=%s torch_tensorrt=%s",
+        "%s: torch=%s cuda=%s cuda_python=%s(driver=%s,pkg=%s) mps=%s mlx=%s mlx_ver=%s backend=%s device=%s device_name=%s accelerator=%s devices=%s precision=%s tensorrt=%s torch_tensorrt=%s",
         prefix,
         runtime_caps["torch_version"],
         runtime_caps["cuda_available"],
+        runtime_caps.get("cuda_python_available", False),
+        runtime_caps.get("cuda_python_version", "unknown"),
+        runtime_caps.get("cuda_python_package_version", "unknown"),
         runtime_caps["mps_available"],
         runtime_caps["mlx_available"],
+        runtime_caps.get("mlx_version", "n/a"),
+        runtime_caps.get("backend_request", "auto"),
         runtime_caps["device"],
         runtime_caps["device_name"],
         runtime_caps["accelerator"],
@@ -356,16 +463,135 @@ def log_runtime_capabilities(logger: logging.Logger, runtime_caps: Optional[Dict
         )
     if runtime_caps["mlx_available"]:
         logger.info(
-            "%s: MLX is installed, but this training stack is PyTorch/Lightning; use MPS for Apple GPU runs unless models are ported to MLX.",
+            "%s: MLX is available. Set STRESS_BACKEND=mlx (or keep auto on Apple silicon) "
+            "for LSTM, CNN-LSTM, Transformer, and PatchTST; TimesFM uses a hybrid "
+            "PyTorch backbone + MLX head on Apple silicon.",
             prefix,
         )
     return runtime_caps
 
 # --- Loading Preprocessed Data ---
-def load_preprocessed_data(config: Dict[str, Any], clear_files: bool = False) -> Tuple[Optional[Dict], Optional[Dict], Optional[Dict]]:
+
+PROCESSED_SUBJECT_SUFFIX = "_processed.joblib"
+PROCESSED_FILE_MAP_NAME = "processed_file_map.joblib"
+
+
+def _basename_any_os(path: str) -> str:
     """
-    Loads the preprocessed data, static features, and R-peak results from .joblib files,
-    OR clears (deletes) these files if clear_files is set to True.
+    Return the final component of a path written by either OS.
+
+    The file map records absolute paths from whichever machine ran preprocessing,
+    so a map produced on Windows carries backslash-separated paths that
+    posixpath.basename() would hand back unsplit.
+    """
+    return path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
+def resolve_processed_file_map(config: Dict[str, Any]) -> Dict[Union[int, str], str]:
+    """
+    Resolve the {subject_id: file_path} map for the per-subject processed .joblib
+    files written by preprocess_all_subjects().
+
+    Downstream stages consume paths and load each subject lazily
+    (data_pipeline._calculate_input_dims, windowing.create_all_subject_windows),
+    which is what keeps the whole cohort out of memory.
+
+    Resolution order:
+        1. processed_file_map.joblib, with every entry re-anchored by filename to the
+           configured processed_data directory. The map stores absolute paths from the
+           machine that ran preprocessing, so they are wrong after the project moves
+           between machines or operating systems.
+        2. A directory scan for '*_processed.joblib' when the map is absent,
+           unreadable, malformed, or resolves to no file that exists.
+
+    Args:
+        config (Dict[str, Any]): Loaded configuration containing save_paths.processed_data.
+
+    Returns:
+        Dict[Union[int, str], str]: Subject ID -> existing absolute .joblib path.
+            Empty if the directory is unconfigured, missing, or holds no subject files.
+    """
+    processed_dir = safe_get(config, ['save_paths', 'processed_data'])
+    if not processed_dir or not isinstance(processed_dir, str):
+        log.error("Path 'save_paths.processed_data' not found or invalid in config. Cannot resolve processed files.")
+        return {}
+
+    abs_processed_dir = os.path.abspath(processed_dir)
+    if not os.path.isdir(abs_processed_dir):
+        log.error(f"Processed data directory does not exist: {abs_processed_dir}")
+        return {}
+
+    file_map: Dict[Union[int, str], str] = {}
+    map_path = os.path.join(abs_processed_dir, PROCESSED_FILE_MAP_NAME)
+
+    # --- Route 1: the file map written alongside the per-subject files ---
+    if joblib is not None and os.path.exists(map_path):
+        stored_map = None
+        try:
+            stored_map = joblib.load(map_path)
+        except Exception as e:
+            log.warning(f"Failed to read {PROCESSED_FILE_MAP_NAME} ({e}). Falling back to a directory scan.")
+
+        if isinstance(stored_map, dict):
+            unresolved = []
+            for subj_id, stored_path in stored_map.items():
+                if not isinstance(stored_path, str) or not stored_path:
+                    unresolved.append(subj_id)
+                    continue
+                if os.path.exists(stored_path):
+                    file_map[subj_id] = os.path.abspath(stored_path)
+                    continue
+                # Recorded path is stale (different machine or OS) - re-anchor by filename.
+                candidate = os.path.join(abs_processed_dir, _basename_any_os(stored_path))
+                if os.path.exists(candidate):
+                    file_map[subj_id] = candidate
+                else:
+                    unresolved.append(subj_id)
+            if unresolved:
+                log.warning(
+                    f"{len(unresolved)} of {len(stored_map)} entries in {PROCESSED_FILE_MAP_NAME} "
+                    f"point at files that do not exist and were dropped: {sorted(map(str, unresolved))}"
+                )
+            if file_map:
+                log.info(f"Resolved {len(file_map)} subject file(s) from {map_path}")
+        elif stored_map is not None:
+            log.warning(
+                f"{PROCESSED_FILE_MAP_NAME} did not contain a dictionary "
+                f"(got {type(stored_map).__name__}). Falling back to a directory scan."
+            )
+
+    # --- Route 2: scan for the files the pipeline always writes next to the map ---
+    if not file_map:
+        # glob.escape: a directory named e.g. 'run[1]' would otherwise be read as a pattern.
+        scan_pattern = os.path.join(glob.escape(abs_processed_dir), f"*{PROCESSED_SUBJECT_SUFFIX}")
+        for path in sorted(glob.glob(scan_pattern)):
+            subj_id = _basename_any_os(path)[: -len(PROCESSED_SUBJECT_SUFFIX)]
+            if subj_id:
+                file_map[subj_id] = path
+        if file_map:
+            log.info(
+                f"Recovered {len(file_map)} subject file(s) by scanning {abs_processed_dir} "
+                f"(no usable {PROCESSED_FILE_MAP_NAME})."
+            )
+
+    if not file_map:
+        log.error(
+            f"No per-subject '*{PROCESSED_SUBJECT_SUFFIX}' files found in {abs_processed_dir}. "
+            "Run the preprocessing pipeline first."
+        )
+    return file_map
+
+
+def load_preprocessed_data(config: Dict[str, Any], clear_files: bool = False) -> Tuple[Optional[Dict[Union[int, str], str]], Optional[Dict], Optional[Dict]]:
+    """
+    Loads the artifacts written by preprocess_all_subjects(), OR clears (deletes)
+    them if clear_files is set to True.
+
+    Returns the same triple shape that preprocess_all_subjects() returns, so a run
+    resumed from disk is interchangeable with a fresh one. The first element is a
+    {subject_id: file_path} map, NOT the signal data itself: get_data_splits() and
+    create_all_subject_windows() load each subject lazily from its path so the
+    cohort is never resident in memory at once.
 
     Args:
         config (Dict[str, Any]): The loaded configuration dictionary containing save_paths.
@@ -375,7 +601,8 @@ def load_preprocessed_data(config: Dict[str, Any], clear_files: bool = False) ->
     Returns:
         If clear_files is False:
             A tuple containing:
-                - processed_data (Dict | None): Dictionary of processed signals and labels.
+                - processed_file_paths (Dict | None): Subject ID -> processed .joblib path.
+                  None if no subject file could be resolved.
                 - static_features_results (Dict | None): Dictionary of calculated static features.
                 - r_peak_results (Dict | None): Dictionary of calculated R-peak indices.
         If clear_files is True:
@@ -386,7 +613,7 @@ def load_preprocessed_data(config: Dict[str, Any], clear_files: bool = False) ->
     else:
         log.info("--- Attempting to LOAD preprocessed data from .joblib files ---")
 
-    processed_data = None
+    processed_file_paths = None
     static_features_results = None
     r_peak_results = None
 
@@ -403,21 +630,27 @@ def load_preprocessed_data(config: Dict[str, Any], clear_files: bool = False) ->
 
     # Define file paths using os.path.join for cross-platform compatibility
     # Ensure paths are constructed only if the directory paths are valid strings
-    proc_file_path = os.path.join(os.path.abspath(processed_dir), "processed_aligned_data.joblib") if processed_dir and isinstance(processed_dir, str) else None
     feat_file_path = os.path.join(os.path.abspath(static_feat_dir), "static_features_results.joblib") if static_feat_dir and isinstance(static_feat_dir, str) else None
     rpeak_file_path = os.path.join(os.path.abspath(r_peak_dir), "r_peak_indices.joblib") if r_peak_dir and isinstance(r_peak_dir, str) else None
-
-    # Dictionary mapping descriptive names to file paths
-    files_to_process = {
-        "Processed Data": proc_file_path,
-        "Static Features": feat_file_path,
-        "R-Peak Indices": rpeak_file_path
-    }
 
     # --- Conditional Logic: Clear or Load ---
     if clear_files:
         # --- Deletion Logic ---
         log.warning("Clear Files requested. Deleting saved processed data files...")
+
+        # Per-subject files and their map, as written by preprocess_all_subjects().
+        # The legacy 'processed_aligned_data.joblib' monolith is deliberately left in
+        # place: nothing in the pipeline writes it any more, so deleting it here would
+        # destroy an artifact this function can no longer regenerate.
+        subject_file_map = resolve_processed_file_map(config)
+        files_to_process = {f"Processed Subject '{subj_id}'": path
+                            for subj_id, path in subject_file_map.items()}
+        if processed_dir and isinstance(processed_dir, str):
+            files_to_process["Processed File Map"] = os.path.join(os.path.abspath(processed_dir), PROCESSED_FILE_MAP_NAME)
+        files_to_process["Static Features"] = feat_file_path
+        files_to_process["R-Peak Indices"] = rpeak_file_path
+        log.info(f"Clearing {len(subject_file_map)} per-subject file(s) plus map, static features and R-peaks.")
+
         for name, file_path in files_to_process.items():
             if file_path: # Check if path was resolved correctly
                 if os.path.exists(file_path):
@@ -438,20 +671,11 @@ def load_preprocessed_data(config: Dict[str, Any], clear_files: bool = False) ->
 
     else:
         # --- Loading Logic ---
-        # Load processed_data
-        if proc_file_path:
-            if os.path.exists(proc_file_path):
-                try:
-                    processed_data = joblib.load(proc_file_path)
-                    log.info(f"Successfully loaded Processed Data from: {proc_file_path}")
-                except Exception as e:
-                    log.error(f"Failed to load Processed Data from {proc_file_path}: {e}", exc_info=True)
-            else:
-                # File doesn't exist
-                log.warning(f"Processed Data file not found at: {proc_file_path}")
-        else:
-            # Path not configured
-            log.warning("Path 'save_paths.processed_data' not found or invalid in config. Cannot load processed data.")
+        # Resolve the per-subject processed files (paths, loaded lazily downstream)
+        resolved_map = resolve_processed_file_map(config)
+        if resolved_map:
+            processed_file_paths = resolved_map
+            log.info(f"Successfully resolved Processed Data for {len(processed_file_paths)} subject(s).")
 
         # Load static_features_results
         if feat_file_path:
@@ -480,4 +704,4 @@ def load_preprocessed_data(config: Dict[str, Any], clear_files: bool = False) ->
             log.warning("Path for R-peak indices ('save_paths.static_features_results') not found or invalid in config. Cannot load R-peaks.")
 
         # Return loaded data (can be None if loading failed or files didn't exist)
-        return processed_data, static_features_results, r_peak_results
+        return processed_file_paths, static_features_results, r_peak_results

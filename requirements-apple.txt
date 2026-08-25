@@ -1,0 +1,2 @@
+# Apple Silicon optional dependencies (install after requirements.txt)
+mlx>=0.18.0

@@ -24,10 +24,10 @@ function Get-Ownership($path) {
     if($path -like "timesfm/v1/*" -or $path -like "timesfm/timesfm-forecasting/examples/*") { return "Legacy / archive" }
     if($path -in @("README.md","docs/repo-map.md","docs/repo-map.json","docs/repo-map-refresh.ps1")) { return "Documentation" }
     if($path -like "conf/*") { return "Data ingestion / dataset construction" }
-    if($path -in @("main.py","models.py","run_pipeline.py","run_pipeline_timesfm.py","run_lightning.py","training.py","tuning.py","timesfm_wrapper.py","lightning_data.py","lightning_module.py")) { return "Modeling / training" }
+    if($path -in @("main.py","models.py","run_pipeline.py","run_pipeline_timesfm.py","run_lightning.py","training.py","callbacks.py","tuning.py","timesfm_wrapper.py","lightning_data.py","lightning_module.py")) { return "Modeling / training" }
     if($path -in @("data_loader.py","data_pipeline.py","data_splitting.py","preprocessing.py","windowing.py")) { return "Data ingestion / dataset construction" }
     if($path -in @("feature_engineering.py","feature_extraction.py","signal_processing.py","utils.py","pytorch_datasets.py")) { return "Feature engineering / signal processing" }
-    if($path -in @("api.py","evaluation.py","validation.py","benchmark.py","sampling.py","visualization.py","losses.py","export_trt.py")) { return "Evaluation / inference" }
+    if($path -in @("api.py","evaluate_checkpoint.py","evaluation.py","validation.py","benchmark.py","sampling.py","visualization.py","losses.py","export_trt.py")) { return "Evaluation / inference" }
     if($path -like "timesfm/AGENTS.md" -or $path -like "timesfm/README.md" -or $path -like "timesfm/pyproject.toml" -or $path -like "timesfm/src/*" -or $path -like "timesfm/timesfm-forecasting/SKILL.md" -or $path -like "timesfm/timesfm-forecasting/references/*" -or $path -like "timesfm/timesfm-forecasting/scripts/*" -or $path -like "timesfm/.gitattributes" -or $path -like "timesfm/requirements.txt" -or $path -like "timesfm/.github/*" -or $path -like "timesfm/LICENSE") { return "TimesFM package / packaging" }
     if($path -in @("AGENTS.md","CLAUDE.md",".claude/settings.local.json",".devcouncil/config.yaml",".devcouncil/state.sqlite","RESUME_STAR_POINTS.md")) { return "Project governance / meta" }
     if($path -like "tests/*") { return "Tests" }
@@ -100,8 +100,8 @@ $map = [ordered]@{
     ownership_matrix = @(
         [ordered]@{ name = "data"; files = @("data_loader.py","data_pipeline.py","data_splitting.py","preprocessing.py","windowing.py","conf/*") }
         [ordered]@{ name = "feature"; files = @("feature_engineering.py","feature_extraction.py","signal_processing.py","utils.py","pytorch_datasets.py") }
-        [ordered]@{ name = "modeling"; files = @("main.py","models.py","run_pipeline.py","run_pipeline_timesfm.py","run_lightning.py","training.py","tuning.py","timesfm_wrapper.py","lightning_data.py","lightning_module.py") }
-        [ordered]@{ name = "inference"; files = @("api.py","evaluation.py","validation.py","benchmark.py","sampling.py","visualization.py","losses.py","export_trt.py") }
+        [ordered]@{ name = "modeling"; files = @("main.py","models.py","run_pipeline.py","run_pipeline_timesfm.py","run_lightning.py","training.py","callbacks.py","tuning.py","timesfm_wrapper.py","lightning_data.py","lightning_module.py") }
+        [ordered]@{ name = "inference"; files = @("api.py","evaluate_checkpoint.py","evaluation.py","validation.py","benchmark.py","sampling.py","visualization.py","losses.py","export_trt.py") }
         [ordered]@{ name = "documentation"; files = @("README.md","docs/*") }
         [ordered]@{ name = "tests"; files = @("tests/*") }
         [ordered]@{ name = "project_governance"; files = @("AGENTS.md","CLAUDE.md",".claude/*",".devcouncil/*","RESUME_STAR_POINTS.md") }
@@ -112,6 +112,7 @@ $map = [ordered]@{
     call_dependency_anchors = [ordered]@{
         main_to_modeling = @("main.py","utils.py","data_pipeline.py","models.py","lightning_module.py")
         inference_api_flow = @("api.py","initialize_model_state","get_model","/predict")
+        evaluation_calibration_flow = @("evaluate_checkpoint.py","eval_pass*.json","api.py","_resolve_prediction_threshold")
         training_paths = @("run_pipeline_timesfm.py","run_pipeline.py","run_lightning.py")
     }
     high_coupling_candidates = @("utils.py","models.py","preprocessing.py","data_pipeline.py","training.py","lightning_module.py","run_pipeline_timesfm.py")
