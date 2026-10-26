@@ -1,0 +1,18 @@
+StressProject
+Copyright (c) 2025-2026 Bharath Chandra Vaddaram
+
+Third-Party Code & Benchmark Dataset Acknowledgements
+-----------------------------------------------------
+1. Google Research TimesFM (`timesfm/`)
+   https://github.com/google-research/timesfm
+   Copyright 2024 Google LLC
+   Licensed under the Apache License, Version 2.0 (`timesfm/LICENSE`).
+   Das et al., "A decoder-only foundation model for time-series forecasting," ICML 2024.
+
+2. WESAD (Wearable Stress and Affect Detection) Dataset
+   Philip Schmidt, Attila Reiss, Robert Duerichen, Claus Marberger, and Kristof Van Laerhoven.
+   "Introducing WESAD, a Multimodal Dataset for Wearable Stress and Affect Detection," ICMI 2018.
+
+3. Nurse Stress Prediction Dataset
+   S. Hosseini et al., "A multimodal sensor dataset for continuous stress detection of nurses in a hospital,"
+   Scientific Data, 2022.

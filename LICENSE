@@ -1,6 +1,7 @@
 MIT License
 
 Copyright (c) 2025-2026 Bharath Chandra Vaddaram
+The packaged `timesfm/` directory is derived from google-research/timesfm, Copyright 2024 Google LLC, licensed under the Apache License, Version 2.0 (see `timesfm/LICENSE` and `NOTICE`).
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

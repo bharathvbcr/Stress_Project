@@ -394,3 +394,10 @@ pwsh .\docs\repo-map-refresh.ps1 -RepoRoot (Get-Location).Path
 GitNexus is configured for this repository. Use it to inspect unfamiliar
 execution flows, run impact analysis before symbol edits, and detect affected
 flows before committing.
+
+## License & Acknowledgements
+
+Released under the [MIT License](LICENSE) (see [NOTICE](NOTICE) for third-party attributions).
+
+- **[Google Research TimesFM (`google-research/timesfm`)](https://github.com/google-research/timesfm)** (`Copyright 2024 Google LLC`, [Apache-2.0](timesfm/LICENSE)) — Packaged in `timesfm/` as the time-series foundation model backbone (*Das et al., ICML 2024*).
+- **WESAD Dataset** (*Schmidt et al., ICMI 2018*) & **Hospital Nurse Stress Dataset** (*Hosseini et al., Scientific Data 2022*) — Physiological stress detection benchmarks evaluated by this pipeline.
